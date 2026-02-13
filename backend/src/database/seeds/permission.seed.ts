@@ -89,6 +89,18 @@ const PERMISSIONS: PermissionDefinition[] = [
   { module: 'reports', action: 'export', description: 'Export reports' },
   { module: 'settings', action: 'read', description: 'Read settings' },
   { module: 'settings', action: 'update', description: 'Update settings' },
+  { module: 'finance_accounts', action: 'read', description: 'Read chart of accounts' },
+  { module: 'finance_accounts', action: 'seed', description: 'Seed chart of accounts' },
+  { module: 'finance_invoices', action: 'create', description: 'Create finance invoice' },
+  { module: 'finance_invoices', action: 'read', description: 'Read finance invoices' },
+  { module: 'finance_payments', action: 'create', description: 'Create finance payment' },
+  { module: 'finance_payments', action: 'read', description: 'Read finance payments' },
+  { module: 'wallets', action: 'create', description: 'Create wallet' },
+  { module: 'wallets', action: 'read', description: 'Read wallet' },
+  { module: 'reconciliation', action: 'import', description: 'Import statements for reconciliation' },
+  { module: 'reconciliation', action: 'read', description: 'Read reconciliation matches' },
+  { module: 'reconciliation', action: 'match', description: 'Match reconciliations' },
+  { module: 'finance_reports', action: 'read', description: 'Read finance reports' },
   { module: 'users', action: 'create', description: 'Create user' },
   { module: 'users', action: 'read', description: 'Read user' },
   { module: 'users', action: 'update', description: 'Update user' },
@@ -145,6 +157,12 @@ const reportPermissionSlugs = PERMISSIONS.filter(
   (permission) => permission.module === 'reports',
 ).map((permission) => buildSlug(permission.module, permission.action));
 
+const financePermissionSlugs = PERMISSIONS.filter((permission) =>
+  permission.module.startsWith('finance_') ||
+  permission.module === 'wallets' ||
+  permission.module === 'reconciliation',
+).map((permission) => buildSlug(permission.module, permission.action));
+
 const dashboardPermissionSlugs = PERMISSIONS.filter(
   (permission) => permission.module === 'dashboard',
 ).map((permission) => buildSlug(permission.module, permission.action));
@@ -179,6 +197,7 @@ const ROLES: RoleDefinition[] = [
       ...branchProductPermissionSlugs,
       ...stockTransferPermissionSlugs,
       ...reportPermissionSlugs,
+      ...financePermissionSlugs,
       ...dashboardPermissionSlugs,
       'sales_returns.create',
       'sales_returns.read',
@@ -206,6 +225,13 @@ const ROLES: RoleDefinition[] = [
       'inventory.view',
       'dashboard.view',
       'settings.read',
+      'finance_invoices.create',
+      'finance_invoices.read',
+      'finance_payments.create',
+      'finance_payments.read',
+      'wallets.read',
+      'reconciliation.read',
+      'finance_reports.read',
     ],
   },
   {
