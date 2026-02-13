@@ -1,1 +1,12 @@
 /index.html
+
+# Environment files
+.env
+.env.*
+!.env.example
+**/.env
+**/.env.*
+!**/.env.example
+
+# Runtime/deploy artifacts
+.deploy-state

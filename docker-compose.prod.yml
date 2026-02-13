@@ -1,0 +1,50 @@
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: inventory-pos-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${DB_NAME}
+      POSTGRES_USER: ${DB_USERNAME}
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USERNAME} -d ${DB_NAME}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+
+  backend:
+    image: ${BACKEND_IMAGE}
+    container_name: inventory-pos-backend
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    env_file:
+      - ./.env
+    environment:
+      NODE_ENV: production
+      PORT: 3000
+      DB_HOST: db
+      DB_PORT: 5432
+      DB_SYNCHRONIZE: "false"
+    ports:
+      - "${BACKEND_PORT:-3000}:3000"
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "const http=require('http');http.get('http://127.0.0.1:3000/api/docs',res=>process.exit(res.statusCode<500?0:1)).on('error',()=>process.exit(1));",
+        ]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 25s
+
+volumes:
+  postgres_data:

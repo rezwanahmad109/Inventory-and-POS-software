@@ -1,0 +1,55 @@
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: inventory-pos-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${DB_NAME:-inventory_pos}
+      POSTGRES_USER: ${DB_USERNAME:-postgres}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-postgres}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USERNAME:-postgres} -d ${DB_NAME:-inventory_pos}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+
+  backend:
+    container_name: inventory-pos-backend
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+      target: production
+    image: inventory-pos-backend:${APP_IMAGE_TAG:-local}
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    env_file:
+      - ./backend/.env
+    environment:
+      NODE_ENV: ${NODE_ENV:-production}
+      PORT: 3000
+      DB_HOST: db
+      DB_PORT: 5432
+      DB_SYNCHRONIZE: "${DB_SYNCHRONIZE:-false}"
+      DB_SSL: "${DB_SSL:-false}"
+    ports:
+      - "${BACKEND_PORT:-3000}:3000"
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "const http=require('http');http.get('http://127.0.0.1:3000/api/docs',res=>process.exit(res.statusCode<500?0:1)).on('error',()=>process.exit(1));",
+        ]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 25s
+
+volumes:
+  postgres_data:

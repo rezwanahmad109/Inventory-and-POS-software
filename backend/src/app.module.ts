@@ -45,10 +45,16 @@ import { SupplierModule } from './supplier/supplier.module';
 import { UnitsModule } from './units/units.module';
 import { UserRolesModule } from './user-roles/user-roles.module';
 import { UsersModule } from './users/users.module';
+import { validateEnv } from './config/env.validation';
 
 @Module({
   imports: [
-    ConfigModule.forRoot({ isGlobal: true }),
+    ConfigModule.forRoot({
+      isGlobal: true,
+      cache: true,
+      envFilePath: ['.env.local', '.env'],
+      validate: validateEnv,
+    }),
     TypeOrmModule.forRootAsync({
       inject: [ConfigService],
       useFactory: (configService: ConfigService) => {
