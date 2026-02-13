@@ -54,6 +54,9 @@ class _PosScreenState extends State<PosScreen> {
       appBar: POSAppBar(
         onInventoryTap: () => _openRoute(context, AppRoutes.inventory),
         onSalesHistoryTap: () => _openRoute(context, AppRoutes.salesHistory),
+        onSalesReturnTap: () => _openRoute(context, AppRoutes.salesReturn),
+        onPurchaseReturnTap: () =>
+            _openRoute(context, AppRoutes.purchaseReturn),
         onSettingsTap: () => _openRoute(context, AppRoutes.settings),
       ),
       body: SafeArea(
@@ -63,7 +66,9 @@ class _PosScreenState extends State<PosScreen> {
             return LayoutBuilder(
               builder: (BuildContext context, BoxConstraints constraints) {
                 final bool wideLayout = constraints.maxWidth >= 1024;
-                final double cartHeight = constraints.maxWidth >= 700 ? 320 : 280;
+                final double cartHeight = constraints.maxWidth >= 700
+                    ? 320
+                    : 280;
 
                 if (wideLayout) {
                   return Row(
@@ -152,11 +157,15 @@ class POSAppBar extends StatelessWidget implements PreferredSizeWidget {
     super.key,
     required this.onInventoryTap,
     required this.onSalesHistoryTap,
+    required this.onSalesReturnTap,
+    required this.onPurchaseReturnTap,
     required this.onSettingsTap,
   });
 
   final VoidCallback onInventoryTap;
   final VoidCallback onSalesHistoryTap;
+  final VoidCallback onSalesReturnTap;
+  final VoidCallback onPurchaseReturnTap;
   final VoidCallback onSettingsTap;
 
   @override
@@ -167,10 +176,7 @@ class POSAppBar extends StatelessWidget implements PreferredSizeWidget {
     final bool compact = MediaQuery.of(context).size.width < 760;
 
     return AppBar(
-      title: const Text(
-        'POS',
-        style: TextStyle(fontWeight: FontWeight.w700),
-      ),
+      title: const Text('POS', style: TextStyle(fontWeight: FontWeight.w700)),
       backgroundColor: Colors.white,
       foregroundColor: kPosPrimaryBlue,
       surfaceTintColor: Colors.white,
@@ -186,6 +192,12 @@ class POSAppBar extends StatelessWidget implements PreferredSizeWidget {
                     case 'sales':
                       onSalesHistoryTap();
                       break;
+                    case 'sales_return':
+                      onSalesReturnTap();
+                      break;
+                    case 'purchase_return':
+                      onPurchaseReturnTap();
+                      break;
                     case 'settings':
                       onSettingsTap();
                       break;
@@ -193,20 +205,29 @@ class POSAppBar extends StatelessWidget implements PreferredSizeWidget {
                       break;
                   }
                 },
-                itemBuilder: (BuildContext context) => const <PopupMenuEntry<String>>[
-                  PopupMenuItem<String>(
-                    value: 'inventory',
-                    child: Text('Inventory'),
-                  ),
-                  PopupMenuItem<String>(
-                    value: 'sales',
-                    child: Text('Sales History'),
-                  ),
-                  PopupMenuItem<String>(
-                    value: 'settings',
-                    child: Text('Settings'),
-                  ),
-                ],
+                itemBuilder: (BuildContext context) =>
+                    const <PopupMenuEntry<String>>[
+                      PopupMenuItem<String>(
+                        value: 'inventory',
+                        child: Text('Inventory'),
+                      ),
+                      PopupMenuItem<String>(
+                        value: 'sales',
+                        child: Text('Sales History'),
+                      ),
+                      PopupMenuItem<String>(
+                        value: 'sales_return',
+                        child: Text('Sales Return'),
+                      ),
+                      PopupMenuItem<String>(
+                        value: 'purchase_return',
+                        child: Text('Purchase Return'),
+                      ),
+                      PopupMenuItem<String>(
+                        value: 'settings',
+                        child: Text('Settings'),
+                      ),
+                    ],
               ),
             ]
           : <Widget>[
@@ -219,6 +240,16 @@ class POSAppBar extends StatelessWidget implements PreferredSizeWidget {
                 label: 'Sales History',
                 icon: Icons.receipt_long_outlined,
                 onPressed: onSalesHistoryTap,
+              ),
+              _AppBarActionButton(
+                label: 'Sales Return',
+                icon: Icons.assignment_return_outlined,
+                onPressed: onSalesReturnTap,
+              ),
+              _AppBarActionButton(
+                label: 'Purchase Return',
+                icon: Icons.keyboard_return_outlined,
+                onPressed: onPurchaseReturnTap,
               ),
               _AppBarActionButton(
                 label: 'Settings',
@@ -340,7 +371,9 @@ class ProductGridView extends StatelessWidget {
                         Text(
                           'Stock: ${product.stockQty}',
                           style: TextStyle(
-                            color: lowStock ? Colors.red.shade700 : Colors.black54,
+                            color: lowStock
+                                ? Colors.red.shade700
+                                : Colors.black54,
                             fontSize: 12.5,
                           ),
                         ),
@@ -352,7 +385,9 @@ class ProductGridView extends StatelessWidget {
                                 style: FilledButton.styleFrom(
                                   backgroundColor: kPosPrimaryBlue,
                                 ),
-                                onPressed: canAdd ? () => onProductTap(product) : null,
+                                onPressed: canAdd
+                                    ? () => onProductTap(product)
+                                    : null,
                                 child: Text(canAdd ? 'Add' : 'Max'),
                               ),
                             ),
@@ -369,7 +404,9 @@ class ProductGridView extends StatelessWidget {
                                 ),
                                 child: Text(
                                   'x$inCart',
-                                  style: const TextStyle(fontWeight: FontWeight.w700),
+                                  style: const TextStyle(
+                                    fontWeight: FontWeight.w700,
+                                  ),
                                 ),
                               ),
                             ],
@@ -409,22 +446,19 @@ class _ProductImage extends StatelessWidget {
               child: const Icon(Icons.image_not_supported_outlined),
             );
           },
-          loadingBuilder: (
-            BuildContext context,
-            Widget child,
-            ImageChunkEvent? progress,
-          ) {
-            if (progress == null) return child;
-            return Container(
-              color: Colors.blueGrey.withOpacity(0.06),
-              alignment: Alignment.center,
-              child: const SizedBox(
-                width: 18,
-                height: 18,
-                child: CircularProgressIndicator(strokeWidth: 2),
-              ),
-            );
-          },
+          loadingBuilder:
+              (BuildContext context, Widget child, ImageChunkEvent? progress) {
+                if (progress == null) return child;
+                return Container(
+                  color: Colors.blueGrey.withOpacity(0.06),
+                  alignment: Alignment.center,
+                  child: const SizedBox(
+                    width: 18,
+                    height: 18,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  ),
+                );
+              },
         ),
       ),
     );
@@ -471,7 +505,10 @@ class CartPanel extends StatelessWidget {
           children: <Widget>[
             Row(
               children: <Widget>[
-                const Icon(Icons.shopping_cart_checkout, color: kPosPrimaryBlue),
+                const Icon(
+                  Icons.shopping_cart_checkout,
+                  color: kPosPrimaryBlue,
+                ),
                 const SizedBox(width: 8),
                 const Text(
                   'Cart',
@@ -650,10 +687,8 @@ class _EmptyCartView extends StatelessWidget {
 
 /// UI-independent POS state and calculations.
 class PosController extends ChangeNotifier {
-  PosController({
-    required List<PosProduct> products,
-    required this.taxRate,
-  }) : products = List<PosProduct>.unmodifiable(products);
+  PosController({required List<PosProduct> products, required this.taxRate})
+    : products = List<PosProduct>.unmodifiable(products);
 
   final List<PosProduct> products;
   final double taxRate;
@@ -710,9 +745,9 @@ class PosController extends ChangeNotifier {
   }
 
   double get subtotal => _lineByProductId.values.fold<double>(
-        0,
-        (double sum, CartLine line) => sum + line.lineTotal,
-      );
+    0,
+    (double sum, CartLine line) => sum + line.lineTotal,
+  );
 
   double get taxAmount => subtotal * taxRate;
 
@@ -736,10 +771,7 @@ class PosProduct {
 }
 
 class CartLine {
-  CartLine({
-    required this.product,
-    required this.quantity,
-  });
+  CartLine({required this.product, required this.quantity});
 
   final PosProduct product;
   int quantity;
@@ -757,10 +789,7 @@ class CheckoutPlaceholderScreen extends StatelessWidget {
 }
 
 class PlaceholderNavScreen extends StatelessWidget {
-  const PlaceholderNavScreen({
-    super.key,
-    required this.title,
-  });
+  const PlaceholderNavScreen({super.key, required this.title});
 
   final String title;
 

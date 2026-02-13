@@ -85,6 +85,37 @@ class _InventoryListScreenState extends State<InventoryListScreen> {
               );
             },
           ),
+          BlocBuilder<AuthBloc, AuthState>(
+            builder: (BuildContext context, AuthState authState) {
+              final bool canSalesReturn = authState.hasPermission(
+                'sales_returns.create',
+              );
+              final bool canPurchaseReturn = authState.hasPermission(
+                'purchase_returns.create',
+              );
+              if (!canSalesReturn && !canPurchaseReturn) {
+                return const SizedBox.shrink();
+              }
+
+              return PopupMenuButton<String>(
+                tooltip: 'Returns',
+                icon: const Icon(Icons.assignment_return_outlined),
+                onSelected: (String route) => _navigateToSection(route),
+                itemBuilder: (_) => <PopupMenuEntry<String>>[
+                  if (canSalesReturn)
+                    const PopupMenuItem<String>(
+                      value: AppRoutes.salesReturn,
+                      child: Text('Sales Return'),
+                    ),
+                  if (canPurchaseReturn)
+                    const PopupMenuItem<String>(
+                      value: AppRoutes.purchaseReturn,
+                      child: Text('Purchase Return'),
+                    ),
+                ],
+              );
+            },
+          ),
           IconButton(
             tooltip: 'Sales History',
             onPressed: () => _navigateToSection(AppRoutes.salesHistory),
@@ -102,6 +133,12 @@ class _InventoryListScreenState extends State<InventoryListScreen> {
           return _AppDrawer(
             onNavigate: _navigateToSection,
             canManageRoles: authState.hasPermission('roles.read'),
+            canCreateSalesReturn: authState.hasPermission(
+              'sales_returns.create',
+            ),
+            canCreatePurchaseReturn: authState.hasPermission(
+              'purchase_returns.create',
+            ),
           );
         },
       ),
@@ -119,34 +156,38 @@ class _InventoryListScreenState extends State<InventoryListScreen> {
             Expanded(
               child: FutureBuilder<List<Product>>(
                 future: _productsFuture,
-                builder: (
-                  BuildContext context,
-                  AsyncSnapshot<List<Product>> snapshot,
-                ) {
-                  if (snapshot.connectionState == ConnectionState.waiting) {
-                    return const Center(child: CircularProgressIndicator());
-                  }
-                  if (snapshot.hasError) {
-                    return _ErrorState(
-                      message: 'Failed to load products.',
-                      onRetry: _refreshProducts,
-                    );
-                  }
-                  final List<Product> products = snapshot.data ?? <Product>[];
-                  final List<Product> visibleProducts = _showLowStockOnly
-                      ? products.where((Product p) => p.stockQty <= 10).toList()
-                      : products;
+                builder:
+                    (
+                      BuildContext context,
+                      AsyncSnapshot<List<Product>> snapshot,
+                    ) {
+                      if (snapshot.connectionState == ConnectionState.waiting) {
+                        return const Center(child: CircularProgressIndicator());
+                      }
+                      if (snapshot.hasError) {
+                        return _ErrorState(
+                          message: 'Failed to load products.',
+                          onRetry: _refreshProducts,
+                        );
+                      }
+                      final List<Product> products =
+                          snapshot.data ?? <Product>[];
+                      final List<Product> visibleProducts = _showLowStockOnly
+                          ? products
+                                .where((Product p) => p.stockQty <= 10)
+                                .toList()
+                          : products;
 
-                  if (visibleProducts.isEmpty) {
-                    return const _EmptyState();
-                  }
-                  return RefreshIndicator(
-                    onRefresh: _refreshProducts,
-                    child: _ResponsiveProductCollection(
-                      products: visibleProducts,
-                    ),
-                  );
-                },
+                      if (visibleProducts.isEmpty) {
+                        return const _EmptyState();
+                      }
+                      return RefreshIndicator(
+                        onRefresh: _refreshProducts,
+                        child: _ResponsiveProductCollection(
+                          products: visibleProducts,
+                        ),
+                      );
+                    },
               ),
             ),
           ],
@@ -185,10 +226,22 @@ class _InventoryListScreenState extends State<InventoryListScreen> {
           }
         },
         destinations: const <NavigationDestination>[
-          NavigationDestination(icon: Icon(Icons.inventory_2_outlined), label: 'Inventory'),
-          NavigationDestination(icon: Icon(Icons.shopping_cart_checkout), label: 'Checkout'),
-          NavigationDestination(icon: Icon(Icons.receipt_long_outlined), label: 'Sales'),
-          NavigationDestination(icon: Icon(Icons.settings_outlined), label: 'Settings'),
+          NavigationDestination(
+            icon: Icon(Icons.inventory_2_outlined),
+            label: 'Inventory',
+          ),
+          NavigationDestination(
+            icon: Icon(Icons.shopping_cart_checkout),
+            label: 'Checkout',
+          ),
+          NavigationDestination(
+            icon: Icon(Icons.receipt_long_outlined),
+            label: 'Sales',
+          ),
+          NavigationDestination(
+            icon: Icon(Icons.settings_outlined),
+            label: 'Settings',
+          ),
         ],
       ),
     );
@@ -199,10 +252,14 @@ class _AppDrawer extends StatelessWidget {
   const _AppDrawer({
     required this.onNavigate,
     required this.canManageRoles,
+    required this.canCreateSalesReturn,
+    required this.canCreatePurchaseReturn,
   });
 
   final ValueChanged<String> onNavigate;
   final bool canManageRoles;
+  final bool canCreateSalesReturn;
+  final bool canCreatePurchaseReturn;
 
   @override
   Widget build(BuildContext context) {
@@ -249,6 +306,24 @@ class _AppDrawer extends StatelessWidget {
               onNavigate(AppRoutes.salesHistory);
             },
           ),
+          if (canCreateSalesReturn)
+            ListTile(
+              leading: const Icon(Icons.assignment_return_outlined),
+              title: const Text('Sales Return'),
+              onTap: () {
+                Navigator.pop(context);
+                onNavigate(AppRoutes.salesReturn);
+              },
+            ),
+          if (canCreatePurchaseReturn)
+            ListTile(
+              leading: const Icon(Icons.keyboard_return_outlined),
+              title: const Text('Purchase Return'),
+              onTap: () {
+                Navigator.pop(context);
+                onNavigate(AppRoutes.purchaseReturn);
+              },
+            ),
           ListTile(
             leading: const Icon(Icons.settings_outlined),
             title: const Text('Settings'),
@@ -306,8 +381,9 @@ class _InventoryToolbar extends StatelessWidget {
             label: const Text('Low stock only'),
             selected: showLowStockOnly,
             onSelected: onToggleLowStock,
-            selectedColor:
-                Theme.of(context).colorScheme.secondary.withOpacity(0.28),
+            selectedColor: Theme.of(
+              context,
+            ).colorScheme.secondary.withOpacity(0.28),
           );
 
           if (stacked) {
@@ -396,8 +472,9 @@ class _ProductListTile extends StatelessWidget {
           );
         },
         leading: CircleAvatar(
-          backgroundColor:
-              Theme.of(context).colorScheme.secondary.withOpacity(0.22),
+          backgroundColor: Theme.of(
+            context,
+          ).colorScheme.secondary.withOpacity(0.22),
           child: Text(
             product.name.isEmpty ? '?' : product.name[0].toUpperCase(),
             style: const TextStyle(fontWeight: FontWeight.w700),
@@ -462,10 +539,9 @@ class _ProductCard extends StatelessWidget {
                       Chip(
                         label: const Text('Low'),
                         visualDensity: VisualDensity.compact,
-                        backgroundColor: Theme.of(context)
-                            .colorScheme
-                            .secondary
-                            .withOpacity(0.25),
+                        backgroundColor: Theme.of(
+                          context,
+                        ).colorScheme.secondary.withOpacity(0.25),
                       ),
                   ],
                 ),
@@ -474,9 +550,9 @@ class _ProductCard extends StatelessWidget {
                 const Spacer(),
                 Text(
                   '\$${product.unitPrice.toStringAsFixed(2)}',
-                  style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                        fontWeight: FontWeight.w700,
-                      ),
+                  style: Theme.of(
+                    context,
+                  ).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w700),
                 ),
                 const SizedBox(height: 2),
                 Text(
@@ -580,7 +656,7 @@ class Product {
 
 class InventoryApiService {
   InventoryApiService({required this.baseUri, http.Client? client})
-      : _client = client ?? http.Client();
+    : _client = client ?? http.Client();
 
   static const Duration _requestTimeout = Duration(seconds: 8);
 
@@ -591,8 +667,9 @@ class InventoryApiService {
     final Uri uri = _buildProductsUri(query: query);
 
     try {
-      final http.Response response =
-          await _client.get(uri).timeout(_requestTimeout);
+      final http.Response response = await _client
+          .get(uri)
+          .timeout(_requestTimeout);
       if (response.statusCode == 200) {
         final dynamic decoded = jsonDecode(response.body);
         if (decoded is List<dynamic>) {
@@ -628,9 +705,7 @@ class InventoryApiService {
       baseUri.path.endsWith('/') ? 'products' : '${baseUri.path}/products',
     );
     if (query.isEmpty) return endpoint;
-    return endpoint.replace(
-      queryParameters: <String, String>{'query': query},
-    );
+    return endpoint.replace(queryParameters: <String, String>{'query': query});
   }
 
   List<Product> _asProductList(List<dynamic> rows) {

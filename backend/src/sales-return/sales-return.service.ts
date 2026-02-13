@@ -6,6 +6,7 @@ import {
 import { InjectRepository } from '@nestjs/typeorm';
 import { DataSource, Repository } from 'typeorm';
 
+import { BranchesService } from '../branches/branches.service';
 import { Product } from '../database/entities/product.entity';
 import { Sale } from '../database/entities/sale.entity';
 import { SalesReturn } from '../database/entities/sales-return.entity';
@@ -23,6 +24,7 @@ export class SalesReturnService {
     @InjectRepository(SalesReturn)
     private readonly salesReturnRepository: Repository<SalesReturn>,
     private readonly dataSource: DataSource,
+    private readonly branchesService: BranchesService,
   ) {}
 
   /**
@@ -105,9 +107,19 @@ export class SalesReturnService {
           throw new BadRequestException(`Product "${product.name}" was not part of the original sale.`);
         }
 
-        // Update product stock (add back returned quantity)
-        product.stockQty += item.quantity;
-        await manager.save(Product, product);
+        if (originalSale.branchId) {
+          await this.branchesService.increaseStockInBranch(
+            manager,
+            originalSale.branchId,
+            product,
+            item.quantity,
+            'sales_return',
+          );
+        } else {
+          // Update product stock (add back returned quantity)
+          product.stockQty += item.quantity;
+          await manager.save(Product, product);
+        }
 
         // Always use original sale price to prevent client-side refund tampering.
         const unitPrice = Number(saleItem.unitPrice);

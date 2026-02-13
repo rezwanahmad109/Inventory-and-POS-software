@@ -11,6 +11,7 @@ import {
 
 import { PaymentMethod } from '../../common/enums/payment-method.enum';
 import { decimalTransformer } from '../../common/transformers/decimal.transformer';
+import { BranchEntity } from './branch.entity';
 import { Customer } from './customer.entity';
 import { SaleItem } from './sale-item.entity';
 import { SalesReturn } from './sales-return.entity';
@@ -75,6 +76,17 @@ export class Sale {
     transformer: decimalTransformer,
   })
   dueAmount!: number;
+
+  @ManyToOne(() => BranchEntity, {
+    nullable: true,
+    eager: true,
+    onDelete: 'SET NULL',
+  })
+  @JoinColumn({ name: 'branch_id' })
+  branch!: BranchEntity | null;
+
+  @Column({ name: 'branch_id', nullable: true })
+  branchId!: string | null;
 
   @OneToMany(() => SaleItem, (item) => item.sale)
   items!: SaleItem[];

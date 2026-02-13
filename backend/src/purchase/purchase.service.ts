@@ -6,6 +6,7 @@ import {
 import { InjectRepository } from '@nestjs/typeorm';
 import { DataSource, EntityManager, Repository } from 'typeorm';
 
+import { BranchesService } from '../branches/branches.service';
 import { Product } from '../database/entities/product.entity';
 import { PurchaseItem } from '../database/entities/purchase-item.entity';
 import { Purchase } from '../database/entities/purchase.entity';
@@ -20,6 +21,7 @@ export class PurchaseService {
     private readonly purchaseRepository: Repository<Purchase>,
     private readonly dataSource: DataSource,
     private readonly productsService: ProductsService,
+    private readonly branchesService: BranchesService,
   ) {}
 
   async findAll(): Promise<Purchase[]> {
@@ -42,6 +44,20 @@ export class PurchaseService {
 
   async create(createPurchaseDto: CreatePurchaseDto): Promise<Purchase> {
     return this.dataSource.transaction(async (manager) => {
+      let branchId: string | null = null;
+      if (createPurchaseDto.branchId) {
+        const branch = await this.branchesService.getBranchOrFail(
+          createPurchaseDto.branchId,
+          manager,
+        );
+        if (!branch.isActive) {
+          throw new BadRequestException(
+            `Branch "${branch.name}" is inactive. Purchases cannot be posted to this branch.`,
+          );
+        }
+        branchId = branch.id;
+      }
+
       const supplier = await manager.findOne(Supplier, {
         where: { id: createPurchaseDto.supplierId },
       });
@@ -56,6 +72,7 @@ export class PurchaseService {
         supplierId: supplier.id,
         invoiceNumber: await this.generateInvoiceNumber(manager),
         totalAmount: 0,
+        branchId,
       });
 
       const persistedPurchase = await manager.save(Purchase, purchase);
@@ -78,15 +95,25 @@ export class PurchaseService {
         const lineTotal = Number((unitPrice * inputItem.quantity).toFixed(2));
         runningTotal += lineTotal;
 
-        // Stock-in logic: purchase increases inventory stock.
-        const previousStockQty = product.stockQty;
-        product.stockQty += inputItem.quantity;
-        await manager.save(Product, product);
-        this.productsService.handleStockLevelChange(
-          product,
-          previousStockQty,
-          'purchase',
-        );
+        if (branchId) {
+          await this.branchesService.increaseStockInBranch(
+            manager,
+            branchId,
+            product,
+            inputItem.quantity,
+            'purchase',
+          );
+        } else {
+          // Stock-in logic: purchase increases inventory stock.
+          const previousStockQty = product.stockQty;
+          product.stockQty += inputItem.quantity;
+          await manager.save(Product, product);
+          this.productsService.handleStockLevelChange(
+            product,
+            previousStockQty,
+            'purchase',
+          );
+        }
 
         const purchaseItem = manager.create(PurchaseItem, {
           purchase: persistedPurchase,
@@ -136,19 +163,30 @@ export class PurchaseService {
         if (!product) {
           throw new NotFoundException(`Product "${item.productId}" not found.`);
         }
-        if (product.stockQty < item.quantity) {
+        if (!purchase.branchId && product.stockQty < item.quantity) {
           throw new BadRequestException(
             `Cannot delete purchase. Product "${product.name}" stock would become negative.`,
           );
         }
-        const previousStockQty = product.stockQty;
-        product.stockQty -= item.quantity;
-        await manager.save(Product, product);
-        this.productsService.handleStockLevelChange(
-          product,
-          previousStockQty,
-          'purchase_delete',
-        );
+
+        if (purchase.branchId) {
+          await this.branchesService.decreaseStockInBranch(
+            manager,
+            purchase.branchId,
+            product,
+            item.quantity,
+            'purchase_delete',
+          );
+        } else {
+          const previousStockQty = product.stockQty;
+          product.stockQty -= item.quantity;
+          await manager.save(Product, product);
+          this.productsService.handleStockLevelChange(
+            product,
+            previousStockQty,
+            'purchase_delete',
+          );
+        }
       }
 
       await manager.remove(Purchase, purchase);

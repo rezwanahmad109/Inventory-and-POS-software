@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 
+import { BranchesModule } from '../branches/branches.module';
 import { Product } from '../database/entities/product.entity';
 import { ProductsModule } from '../products/products.module';
 import { PurchaseItem } from '../database/entities/purchase-item.entity';
@@ -13,6 +14,7 @@ import { PurchaseService } from './purchase.service';
   imports: [
     TypeOrmModule.forFeature([Purchase, PurchaseItem, Product, Supplier]),
     ProductsModule,
+    BranchesModule,
   ],
   controllers: [PurchaseController],
   providers: [PurchaseService],

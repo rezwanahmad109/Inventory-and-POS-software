@@ -6,6 +6,7 @@ import {
 import { InjectRepository } from '@nestjs/typeorm';
 import { DataSource, EntityManager, Repository } from 'typeorm';
 
+import { BranchesService } from '../branches/branches.service';
 import { RequestUser } from '../common/interfaces/request-user.interface';
 import { Product } from '../database/entities/product.entity';
 import { Sale } from '../database/entities/sale.entity';
@@ -20,6 +21,7 @@ export class SalesService {
     private readonly salesRepository: Repository<Sale>,
     private readonly dataSource: DataSource,
     private readonly productsService: ProductsService,
+    private readonly branchesService: BranchesService,
   ) {}
 
   async createInvoice(
@@ -27,12 +29,27 @@ export class SalesService {
     requestUser: RequestUser,
   ): Promise<Sale> {
     return this.dataSource.transaction(async (manager) => {
+      let branchId: string | null = null;
+      if (createSaleDto.branchId) {
+        const branch = await this.branchesService.getBranchOrFail(
+          createSaleDto.branchId,
+          manager,
+        );
+        if (!branch.isActive) {
+          throw new BadRequestException(
+            `Branch "${branch.name}" is inactive. Sales cannot be posted to this branch.`,
+          );
+        }
+        branchId = branch.id;
+      }
+
       const sale = manager.create(Sale, {
         customer: createSaleDto.customer?.trim() ?? null,
         invoiceNumber: await this.generateInvoiceNumber(manager),
         paymentMethod: createSaleDto.paymentMethod,
         totalAmount: 0,
         createdByUserId: requestUser.userId,
+        branchId,
       });
 
       const persistedSale = await manager.save(Sale, sale);
@@ -49,20 +66,30 @@ export class SalesService {
           throw new NotFoundException(`Product "${item.productId}" not found.`);
         }
 
-        if (product.stockQty < item.quantity) {
+        if (!branchId && product.stockQty < item.quantity) {
           throw new BadRequestException(
             `Insufficient stock for "${product.name}". Available: ${product.stockQty}, requested: ${item.quantity}.`,
           );
         }
 
-        const previousStockQty = product.stockQty;
-        product.stockQty -= item.quantity;
-        await manager.save(Product, product);
-        this.productsService.handleStockLevelChange(
-          product,
-          previousStockQty,
-          'sale',
-        );
+        if (branchId) {
+          await this.branchesService.decreaseStockInBranch(
+            manager,
+            branchId,
+            product,
+            item.quantity,
+            'sale',
+          );
+        } else {
+          const previousStockQty = product.stockQty;
+          product.stockQty -= item.quantity;
+          await manager.save(Product, product);
+          this.productsService.handleStockLevelChange(
+            product,
+            previousStockQty,
+            'sale',
+          );
+        }
 
         const unitPrice = Number(product.price);
         const lineTotal = Number((unitPrice * item.quantity).toFixed(2));

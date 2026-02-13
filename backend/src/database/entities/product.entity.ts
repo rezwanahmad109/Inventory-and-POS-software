@@ -12,10 +12,12 @@ import {
 } from 'typeorm';
 
 import { decimalTransformer } from '../../common/transformers/decimal.transformer';
+import { BranchProductEntity } from './branch-product.entity';
 import { PurchaseItem } from './purchase-item.entity';
 import { PurchaseReturnItem } from './purchase-return-item.entity';
 import { SaleItem } from './sale-item.entity';
 import { SalesReturnItem } from './sales-return-item.entity';
+import { StockTransferEntity } from './stock-transfer.entity';
 
 @Entity({ name: 'categories' })
 export class Category {
@@ -138,6 +140,12 @@ export class Product {
 
   @OneToMany(() => PurchaseReturnItem, (purchaseReturnItem) => purchaseReturnItem.product)
   purchaseReturnItems!: PurchaseReturnItem[];
+
+  @OneToMany(() => BranchProductEntity, (branchProduct) => branchProduct.product)
+  branchProducts!: BranchProductEntity[];
+
+  @OneToMany(() => StockTransferEntity, (stockTransfer) => stockTransfer.product)
+  stockTransfers!: StockTransferEntity[];
 
   @CreateDateColumn({ name: 'created_at' })
   createdAt!: Date;

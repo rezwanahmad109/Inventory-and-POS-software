@@ -37,6 +37,30 @@ const PERMISSIONS: PermissionDefinition[] = [
   { module: 'units', action: 'read', description: 'Read unit' },
   { module: 'units', action: 'update', description: 'Update unit' },
   { module: 'units', action: 'delete', description: 'Delete unit' },
+  { module: 'branches', action: 'create', description: 'Create branch' },
+  { module: 'branches', action: 'read', description: 'Read branch' },
+  { module: 'branches', action: 'update', description: 'Update branch' },
+  { module: 'branches', action: 'delete', description: 'Delete branch' },
+  {
+    module: 'branch_products',
+    action: 'read',
+    description: 'Read branch product stock',
+  },
+  {
+    module: 'branch_products',
+    action: 'update',
+    description: 'Update branch product stock',
+  },
+  {
+    module: 'stock_transfers',
+    action: 'create',
+    description: 'Create stock transfer',
+  },
+  {
+    module: 'stock_transfers',
+    action: 'read',
+    description: 'Read stock transfer history',
+  },
   { module: 'customers', action: 'create', description: 'Create customer' },
   { module: 'customers', action: 'read', description: 'Read customer' },
   { module: 'customers', action: 'update', description: 'Update customer' },
@@ -105,6 +129,18 @@ const customerPermissionSlugs = PERMISSIONS.filter(
   (permission) => permission.module === 'customers',
 ).map((permission) => buildSlug(permission.module, permission.action));
 
+const branchPermissionSlugs = PERMISSIONS.filter(
+  (permission) => permission.module === 'branches',
+).map((permission) => buildSlug(permission.module, permission.action));
+
+const branchProductPermissionSlugs = PERMISSIONS.filter(
+  (permission) => permission.module === 'branch_products',
+).map((permission) => buildSlug(permission.module, permission.action));
+
+const stockTransferPermissionSlugs = PERMISSIONS.filter(
+  (permission) => permission.module === 'stock_transfers',
+).map((permission) => buildSlug(permission.module, permission.action));
+
 const reportPermissionSlugs = PERMISSIONS.filter(
   (permission) => permission.module === 'reports',
 ).map((permission) => buildSlug(permission.module, permission.action));
@@ -139,6 +175,9 @@ const ROLES: RoleDefinition[] = [
       ...inventoryPermissionSlugs,
       ...salesPermissionSlugs,
       ...customerPermissionSlugs,
+      ...branchPermissionSlugs,
+      ...branchProductPermissionSlugs,
+      ...stockTransferPermissionSlugs,
       ...reportPermissionSlugs,
       ...dashboardPermissionSlugs,
       'sales_returns.create',
@@ -162,6 +201,8 @@ const ROLES: RoleDefinition[] = [
       'products.read',
       'customers.read',
       'customers.create',
+      'branches.read',
+      'branch_products.read',
       'inventory.view',
       'dashboard.view',
       'settings.read',
@@ -176,6 +217,8 @@ const ROLES: RoleDefinition[] = [
       'inventory.view',
       'reports.view',
       'products.read',
+      'branches.read',
+      'branch_products.read',
       'customers.read',
       'suppliers.read',
       'settings.read',

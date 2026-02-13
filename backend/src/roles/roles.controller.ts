@@ -12,7 +12,7 @@ import {
   Req,
   UseGuards,
 } from '@nestjs/common';
-import { ApiBearerToken, ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
+import { ApiBearerAuth, ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { Request } from 'express';
 
 import { Permissions } from '../common/decorators/permissions.decorator';
@@ -29,7 +29,7 @@ interface AuthenticatedRequest extends Request {
 }
 
 @ApiTags('Roles')
-@ApiBearerToken()
+@ApiBearerAuth()
 @Controller('roles')
 @UseGuards(JwtAuthGuard, RolesGuard)
 export class RolesController {

@@ -6,6 +6,7 @@ import {
   IsEnum,
   IsOptional,
   IsString,
+  IsUUID,
   MaxLength,
   ValidateNested,
 } from 'class-validator';
@@ -14,6 +15,11 @@ import { PaymentMethod } from '../../common/enums/payment-method.enum';
 import { CreateSaleItemDto } from './create-sale-item.dto';
 
 export class CreateSaleDto {
+  @ApiPropertyOptional({ format: 'uuid' })
+  @IsOptional()
+  @IsUUID()
+  branchId?: string;
+
   @ApiPropertyOptional({ example: 'Walk-in Customer' })
   @IsOptional()
   @IsString()

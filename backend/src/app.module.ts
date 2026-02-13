@@ -3,10 +3,13 @@ import { ConfigModule, ConfigService } from '@nestjs/config';
 import { TypeOrmModule } from '@nestjs/typeorm';
 
 import { AuthModule } from './auth/auth.module';
+import { BranchesModule } from './branches/branches.module';
 import { CategoriesModule } from './categories/categories.module';
 import { CustomersModule } from './customers/customers.module';
 import { DashboardModule } from './dashboard/dashboard.module';
 import { DatabaseModule } from './database/database.module';
+import { BranchEntity } from './database/entities/branch.entity';
+import { BranchProductEntity } from './database/entities/branch-product.entity';
 import { Customer } from './database/entities/customer.entity';
 import { Expense } from './database/entities/expense.entity';
 import { Payment } from './database/entities/payment.entity';
@@ -23,6 +26,7 @@ import { Sale } from './database/entities/sale.entity';
 import { SalesReturn } from './database/entities/sales-return.entity';
 import { SalesReturnItem } from './database/entities/sales-return-item.entity';
 import { Setting } from './database/entities/setting.entity';
+import { StockTransferEntity } from './database/entities/stock-transfer.entity';
 import { Supplier } from './database/entities/supplier.entity';
 import { User } from './database/entities/user.entity';
 import { UserRole } from './database/entities/user-role.entity';
@@ -71,6 +75,9 @@ import { UsersModule } from './users/users.module';
             Product,
             Category,
             Unit,
+            BranchEntity,
+            BranchProductEntity,
+            StockTransferEntity,
             Supplier,
             Sale,
             SaleItem,
@@ -94,6 +101,7 @@ import { UsersModule } from './users/users.module';
     UsersModule,
     AuthModule,
     ProductsModule,
+    BranchesModule,
     CategoriesModule,
     UnitsModule,
     ReportsModule,

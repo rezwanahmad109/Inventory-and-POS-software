@@ -10,6 +10,7 @@ import {
 } from 'typeorm';
 
 import { decimalTransformer } from '../../common/transformers/decimal.transformer';
+import { BranchEntity } from './branch.entity';
 import { PurchaseItem } from './purchase-item.entity';
 import { PurchaseReturn } from './purchase-return.entity';
 import { Supplier } from './supplier.entity';
@@ -33,6 +34,17 @@ export class Purchase {
 
   @Column({ name: 'supplier_id' })
   supplierId!: string;
+
+  @ManyToOne(() => BranchEntity, {
+    nullable: true,
+    eager: true,
+    onDelete: 'SET NULL',
+  })
+  @JoinColumn({ name: 'branch_id' })
+  branch!: BranchEntity | null;
+
+  @Column({ name: 'branch_id', nullable: true })
+  branchId!: string | null;
 
   @OneToMany(() => PurchaseItem, (item) => item.purchase)
   items!: PurchaseItem[];

@@ -7,6 +7,8 @@ class AppRoutes {
   static const String productDetails = '/product-details';
   static const String cartCheckout = '/cart-checkout';
   static const String salesHistory = '/sales-history';
+  static const String salesReturn = '/sales-return';
+  static const String purchaseReturn = '/purchase-return';
   static const String settings = '/settings';
   static const String roles = '/roles';
 }

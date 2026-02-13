@@ -12,7 +12,9 @@ import 'features/roles/repository/role_repository.dart';
 import 'features/roles/screens/role_management_screen.dart';
 import 'screens/checkout_screen.dart';
 import 'screens/inventory_list_screen.dart';
+import 'screens/purchase_return_screen.dart';
 import 'screens/sales_history_screen.dart';
+import 'screens/sales_return_screen.dart';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
@@ -25,25 +27,25 @@ class InventoryPosApp extends StatelessWidget {
   static const Color _primaryBlue = Color(0xFF1F4FFF);
   static const Color _accentGold = Color(0xFFD4AF37);
   static final ApiClient _apiClient = ApiClient();
-  static final RoleRepository _roleRepository =
-      RoleRepository(apiClient: _apiClient);
+  static final RoleRepository _roleRepository = RoleRepository(
+    apiClient: _apiClient,
+  );
 
   @override
   Widget build(BuildContext context) {
-    final ColorScheme scheme = ColorScheme.fromSeed(
-      seedColor: _primaryBlue,
-      brightness: Brightness.light,
-    ).copyWith(
-      primary: _primaryBlue,
-      secondary: _accentGold,
-      surface: Colors.white,
-    );
+    final ColorScheme scheme =
+        ColorScheme.fromSeed(
+          seedColor: _primaryBlue,
+          brightness: Brightness.light,
+        ).copyWith(
+          primary: _primaryBlue,
+          secondary: _accentGold,
+          surface: Colors.white,
+        );
 
     return MultiBlocProvider(
       providers: <BlocProvider<dynamic>>[
-        BlocProvider<AuthBloc>(
-          create: (_) => AuthBloc(),
-        ),
+        BlocProvider<AuthBloc>(create: (_) => AuthBloc()),
         BlocProvider<RoleBloc>(
           create: (_) => RoleBloc(repository: _roleRepository),
         ),
@@ -61,9 +63,7 @@ class InventoryPosApp extends StatelessWidget {
             surfaceTintColor: Colors.white,
           ),
           inputDecorationTheme: InputDecorationTheme(
-            border: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(10),
-            ),
+            border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
             enabledBorder: OutlineInputBorder(
               borderRadius: BorderRadius.circular(10),
               borderSide: const BorderSide(color: Color(0xFFCFD8DC)),
@@ -107,6 +107,30 @@ class InventoryPosApp extends StatelessWidget {
                   return const SalesHistoryScreen();
                 },
               ),
+          AppRoutes.salesReturn: (BuildContext context) =>
+              BlocBuilder<AuthBloc, AuthState>(
+                builder: (BuildContext context, AuthState authState) {
+                  if (authState.status != AuthStatus.authenticated) {
+                    return LoginPage(apiClient: _apiClient);
+                  }
+                  if (!authState.hasPermission('sales_returns.create')) {
+                    return const _AccessDeniedPage(title: 'Sales Return');
+                  }
+                  return SalesReturnScreen(apiClient: _apiClient);
+                },
+              ),
+          AppRoutes.purchaseReturn: (BuildContext context) =>
+              BlocBuilder<AuthBloc, AuthState>(
+                builder: (BuildContext context, AuthState authState) {
+                  if (authState.status != AuthStatus.authenticated) {
+                    return LoginPage(apiClient: _apiClient);
+                  }
+                  if (!authState.hasPermission('purchase_returns.create')) {
+                    return const _AccessDeniedPage(title: 'Purchase Return');
+                  }
+                  return PurchaseReturnScreen(apiClient: _apiClient);
+                },
+              ),
           AppRoutes.settings: (BuildContext context) =>
               BlocBuilder<AuthBloc, AuthState>(
                 builder: (BuildContext context, AuthState authState) {
@@ -126,9 +150,7 @@ class InventoryPosApp extends StatelessWidget {
                     return LoginPage(apiClient: _apiClient);
                   }
                   if (!authState.hasPermission('roles.read')) {
-                    return const _AccessDeniedPage(
-                      title: 'Role Management',
-                    );
+                    return const _AccessDeniedPage(title: 'Role Management');
                   }
                   return const RoleManagementScreen();
                 },
@@ -208,9 +230,10 @@ class _LoginPageState extends State<LoginPage> {
       if (userId.isEmpty) {
         throw const ApiException(500, 'Missing authenticated user id.');
       }
-      final List<String> roles = (userPayload['roles'] as List<dynamic>? ?? <dynamic>[])
-          .map((dynamic role) => role.toString())
-          .toList(growable: false);
+      final List<String> roles =
+          (userPayload['roles'] as List<dynamic>? ?? <dynamic>[])
+              .map((dynamic role) => role.toString())
+              .toList(growable: false);
       final List<String> permissions =
           (userPayload['permissions'] as List<dynamic>? ?? <dynamic>[])
               .map((dynamic permission) => permission.toString())
@@ -218,12 +241,12 @@ class _LoginPageState extends State<LoginPage> {
 
       widget.apiClient.token = token;
       context.read<AuthBloc>().add(
-            AuthSessionSet(
-              userId: userId,
-              roles: roles,
-              userPermissions: permissions,
-            ),
-          );
+        AuthSessionSet(
+          userId: userId,
+          roles: roles,
+          userPermissions: permissions,
+        ),
+      );
 
       if (!mounted) return;
       setState(() {
@@ -235,9 +258,9 @@ class _LoginPageState extends State<LoginPage> {
       setState(() {
         _loading = false;
       });
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(error.message)),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(error.message)));
     } catch (_) {
       if (!mounted) return;
       setState(() {
@@ -266,9 +289,7 @@ class _LoginPageState extends State<LoginPage> {
                   child: wide
                       ? Row(
                           children: <Widget>[
-                            Expanded(
-                              child: const _BrandPanel(),
-                            ),
+                            Expanded(child: const _BrandPanel()),
                             const SizedBox(width: 24),
                             SizedBox(width: 420, child: form),
                           ],
@@ -296,13 +317,11 @@ class _LoginPageState extends State<LoginPage> {
               Text(
                 'Sign in',
                 style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-                      fontWeight: FontWeight.w700,
-                    ),
+                  fontWeight: FontWeight.w700,
+                ),
               ),
               const SizedBox(height: 8),
-              const Text(
-                'Access your inventory and sales dashboard.',
-              ),
+              const Text('Access your inventory and sales dashboard.'),
               const SizedBox(height: 18),
               TextFormField(
                 controller: _emailController,
@@ -392,17 +411,18 @@ class _BrandPanel extends StatelessWidget {
               height: 52,
               decoration: BoxDecoration(
                 borderRadius: BorderRadius.circular(14),
-                color:
-                    Theme.of(context).colorScheme.secondary.withOpacity(0.25),
+                color: Theme.of(
+                  context,
+                ).colorScheme.secondary.withOpacity(0.25),
               ),
               child: const Icon(Icons.point_of_sale_rounded),
             ),
             const SizedBox(height: 18),
             Text(
               'Inventory & POS',
-              style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-                    fontWeight: FontWeight.w700,
-                  ),
+              style: Theme.of(
+                context,
+              ).textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.w700),
             ),
             const SizedBox(height: 10),
             const Text(
@@ -422,7 +442,8 @@ class ProductDetailsPage extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final Product resolvedProduct = product ??
+    final Product resolvedProduct =
+        product ??
         const Product(
           id: 'unknown',
           sku: 'N/A',
@@ -433,9 +454,7 @@ class ProductDetailsPage extends StatelessWidget {
         );
 
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('Product Details'),
-      ),
+      appBar: AppBar(title: const Text('Product Details')),
       body: Center(
         child: ConstrainedBox(
           constraints: const BoxConstraints(maxWidth: 740),
@@ -586,10 +605,7 @@ class _CheckoutPaymentPanel extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: <Widget>[
-            Text(
-              'Payment',
-              style: Theme.of(context).textTheme.titleMedium,
-            ),
+            Text('Payment', style: Theme.of(context).textTheme.titleMedium),
             const SizedBox(height: 10),
             const TextField(
               decoration: InputDecoration(
@@ -702,10 +718,7 @@ class _SettingsPageState extends State<SettingsPage> {
             child: ListTile(
               title: const Text('Backend Base URL'),
               subtitle: Text(AppConfig.apiBaseUrl),
-              trailing: TextButton(
-                onPressed: () {},
-                child: const Text('Edit'),
-              ),
+              trailing: TextButton(onPressed: () {}, child: const Text('Edit')),
             ),
           ),
         ],

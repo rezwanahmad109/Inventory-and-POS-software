@@ -6,6 +6,7 @@ import {
 import { InjectRepository } from '@nestjs/typeorm';
 import { DataSource, Repository } from 'typeorm';
 
+import { BranchesService } from '../branches/branches.service';
 import { Product } from '../database/entities/product.entity';
 import { Purchase } from '../database/entities/purchase.entity';
 import { PurchaseReturn } from '../database/entities/purchase-return.entity';
@@ -23,6 +24,7 @@ export class PurchaseReturnService {
     @InjectRepository(PurchaseReturn)
     private readonly purchaseReturnRepository: Repository<PurchaseReturn>,
     private readonly dataSource: DataSource,
+    private readonly branchesService: BranchesService,
   ) {}
 
   /**
@@ -106,13 +108,24 @@ export class PurchaseReturnService {
         }
 
         // Update product stock (decrease by returned quantity)
-        if (product.stockQty < item.quantity) {
+        if (!originalPurchase.branchId && product.stockQty < item.quantity) {
           throw new BadRequestException(
             `Insufficient stock for "${product.name}". Available: ${product.stockQty}, requested to return: ${item.quantity}.`,
           );
         }
-        product.stockQty -= item.quantity;
-        await manager.save(Product, product);
+
+        if (originalPurchase.branchId) {
+          await this.branchesService.decreaseStockInBranch(
+            manager,
+            originalPurchase.branchId,
+            product,
+            item.quantity,
+            'purchase_return',
+          );
+        } else {
+          product.stockQty -= item.quantity;
+          await manager.save(Product, product);
+        }
 
         // Always use original purchase price to prevent client-side refund tampering.
         const unitPrice = Number(purchaseItem.unitPrice);

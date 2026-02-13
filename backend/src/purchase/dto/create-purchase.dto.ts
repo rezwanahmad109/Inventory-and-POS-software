@@ -1,10 +1,21 @@
-import { ApiProperty } from '@nestjs/swagger';
+import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
-import { ArrayMinSize, IsArray, IsUUID, ValidateNested } from 'class-validator';
+import {
+  ArrayMinSize,
+  IsArray,
+  IsOptional,
+  IsUUID,
+  ValidateNested,
+} from 'class-validator';
 
 import { CreatePurchaseItemDto } from './create-purchase-item.dto';
 
 export class CreatePurchaseDto {
+  @ApiPropertyOptional({ format: 'uuid' })
+  @IsOptional()
+  @IsUUID()
+  branchId?: string;
+
   @ApiProperty({ format: 'uuid' })
   @IsUUID()
   supplierId!: string;
