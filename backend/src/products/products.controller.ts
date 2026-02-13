@@ -3,6 +3,8 @@ import {
   Controller,
   Delete,
   Get,
+  HttpCode,
+  HttpStatus,
   Param,
   ParseUUIDPipe,
   Post,
@@ -22,6 +24,7 @@ import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
 import { CreateProductDto } from './dto/create-product.dto';
 import { ProductsQueryDto } from './dto/products-query.dto';
+import { SearchProductsDto } from './dto/search-products.dto';
 import { UpdateProductDto } from './dto/update-product.dto';
 import { ProductsService } from './products.service';
 
@@ -45,6 +48,22 @@ export class ProductsController {
   @ApiOperation({ summary: 'List all products' })
   findAll(@Query() query: ProductsQueryDto) {
     return this.productsService.findAll(query);
+  }
+
+  @Get('search')
+  @Permissions('products.read')
+  @ApiOperation({
+    summary: 'Search products by SKU, barcode, or name with ranking',
+  })
+  search(@Query() query: SearchProductsDto) {
+    return this.productsService.search(query.q, query.limit);
+  }
+
+  @Get('by-barcode/:barcode')
+  @Permissions('products.read')
+  @ApiOperation({ summary: 'Get product by exact barcode match' })
+  findByBarcode(@Param('barcode') barcode: string) {
+    return this.productsService.findByBarcode(barcode);
   }
 
   @Get('low-stock')
@@ -73,6 +92,7 @@ export class ProductsController {
 
   @Delete(':id')
   @Permissions('products.delete')
+  @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Delete product' })
   async remove(@Param('id', new ParseUUIDPipe()) id: string) {
     await this.productsService.remove(id);

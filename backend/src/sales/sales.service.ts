@@ -8,6 +8,7 @@ import { DataSource, EntityManager, Repository } from 'typeorm';
 
 import { BranchesService } from '../branches/branches.service';
 import { RequestUser } from '../common/interfaces/request-user.interface';
+import { SaleStatus } from '../common/enums/sale-status.enum';
 import { Product } from '../database/entities/product.entity';
 import { Sale } from '../database/entities/sale.entity';
 import { SaleItem } from '../database/entities/sale-item.entity';
@@ -46,8 +47,16 @@ export class SalesService {
       const sale = manager.create(Sale, {
         customer: createSaleDto.customer?.trim() ?? null,
         invoiceNumber: await this.generateInvoiceNumber(manager),
-        paymentMethod: createSaleDto.paymentMethod,
+        paymentMethod: createSaleDto.payments?.[0]?.method ?? null,
+        legacyPaymentMethod: null,
         totalAmount: 0,
+        subtotal: 0,
+        discountTotal: 0,
+        taxTotal: 0,
+        grandTotal: 0,
+        paidTotal: 0,
+        dueTotal: 0,
+        status: SaleStatus.UNPAID,
         createdByUserId: requestUser.userId,
         branchId,
       });
@@ -109,6 +118,28 @@ export class SalesService {
       }
 
       persistedSale.totalAmount = Number(runningTotal.toFixed(2));
+      persistedSale.subtotal = persistedSale.totalAmount;
+      persistedSale.discountTotal = 0;
+      persistedSale.taxTotal = 0;
+      persistedSale.grandTotal = persistedSale.totalAmount;
+
+      const paidTotal = Number(
+        (createSaleDto.payments ?? [])
+          .reduce((sum, payment) => sum + payment.amount, 0)
+          .toFixed(2),
+      );
+
+      persistedSale.paidTotal = paidTotal;
+      persistedSale.dueTotal = Number((persistedSale.grandTotal - paidTotal).toFixed(2));
+      persistedSale.paidAmount = paidTotal;
+      persistedSale.dueAmount = persistedSale.dueTotal;
+      if (persistedSale.dueTotal <= 0) {
+        persistedSale.status = SaleStatus.PAID;
+      } else if (paidTotal > 0) {
+        persistedSale.status = SaleStatus.PARTIAL;
+      } else {
+        persistedSale.status = SaleStatus.UNPAID;
+      }
       await manager.save(Sale, persistedSale);
 
       const createdSale = await manager.findOne(Sale, {

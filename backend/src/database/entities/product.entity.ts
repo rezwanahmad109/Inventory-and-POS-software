@@ -3,6 +3,7 @@ import {
   CreateDateColumn,
   DeleteDateColumn,
   Entity,
+  Index,
   JoinColumn,
   ManyToOne,
   OneToMany,
@@ -12,6 +13,7 @@ import {
 } from 'typeorm';
 
 import { decimalTransformer } from '../../common/transformers/decimal.transformer';
+import { TaxMethod } from '../../common/enums/tax-method.enum';
 import { BranchProductEntity } from './branch-product.entity';
 import { PurchaseItem } from './purchase-item.entity';
 import { PurchaseReturnItem } from './purchase-return-item.entity';
@@ -89,6 +91,10 @@ export class Product {
   @Column({ length: 80 })
   sku!: string;
 
+  @Index('idx_products_barcode_unique', { unique: true })
+  @Column({ length: 80, nullable: true })
+  barcode!: string | null;
+
   @ManyToOne(() => Category, (category) => category.products, {
     nullable: false,
     onDelete: 'RESTRICT',
@@ -116,6 +122,24 @@ export class Product {
     transformer: decimalTransformer,
   })
   price!: number;
+
+  @Column({
+    name: 'tax_rate',
+    type: 'numeric',
+    precision: 5,
+    scale: 2,
+    nullable: true,
+    transformer: decimalTransformer,
+  })
+  taxRate!: number | null;
+
+  @Column({
+    name: 'tax_method',
+    type: 'enum',
+    enum: TaxMethod,
+    default: TaxMethod.EXCLUSIVE,
+  })
+  taxMethod!: TaxMethod;
 
   @Column({ name: 'stock_qty', type: 'integer', default: 0 })
   stockQty!: number;

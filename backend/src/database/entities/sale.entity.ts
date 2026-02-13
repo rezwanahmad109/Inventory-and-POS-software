@@ -2,6 +2,7 @@ import {
   Column,
   CreateDateColumn,
   Entity,
+  Index,
   JoinColumn,
   ManyToOne,
   OneToMany,
@@ -9,11 +10,14 @@ import {
   Unique,
 } from 'typeorm';
 
-import { PaymentMethod } from '../../common/enums/payment-method.enum';
+import { DiscountType } from '../../common/enums/discount-type.enum';
+import { SaleStatus } from '../../common/enums/sale-status.enum';
+import { TaxMethod } from '../../common/enums/tax-method.enum';
 import { decimalTransformer } from '../../common/transformers/decimal.transformer';
 import { BranchEntity } from './branch.entity';
 import { Customer } from './customer.entity';
 import { SaleItem } from './sale-item.entity';
+import { SalePayment } from './sale-payment.entity';
 import { SalesReturn } from './sales-return.entity';
 import { User } from './user.entity';
 
@@ -39,14 +43,23 @@ export class Sale {
   customerId!: number | null;
 
   @Column({ name: 'invoice_number', length: 40 })
+  @Index('idx_sales_invoice_number')
   invoiceNumber!: string;
+
+  @Column({
+    name: 'legacy_payment_method',
+    type: 'text',
+    nullable: true,
+  })
+  legacyPaymentMethod!: string | null;
 
   @Column({
     name: 'payment_method',
     type: 'enum',
-    enum: PaymentMethod,
+    enum: ['cash', 'card', 'mobile'],
+    nullable: true,
   })
-  paymentMethod!: PaymentMethod;
+  paymentMethod!: 'cash' | 'card' | 'mobile' | null;
 
   @Column({
     name: 'total_amount',
@@ -54,8 +67,85 @@ export class Sale {
     precision: 14,
     scale: 2,
     transformer: decimalTransformer,
+    default: 0,
   })
   totalAmount!: number;
+
+  @Column({
+    name: 'subtotal',
+    type: 'numeric',
+    precision: 14,
+    scale: 2,
+    transformer: decimalTransformer,
+    default: 0,
+  })
+  subtotal!: number;
+
+  @Column({
+    name: 'discount_total',
+    type: 'numeric',
+    precision: 14,
+    scale: 2,
+    transformer: decimalTransformer,
+    default: 0,
+  })
+  discountTotal!: number;
+
+  @Column({
+    name: 'tax_total',
+    type: 'numeric',
+    precision: 14,
+    scale: 2,
+    transformer: decimalTransformer,
+    default: 0,
+  })
+  taxTotal!: number;
+
+  @Column({
+    name: 'grand_total',
+    type: 'numeric',
+    precision: 14,
+    scale: 2,
+    transformer: decimalTransformer,
+    default: 0,
+  })
+  grandTotal!: number;
+
+  @Column({
+    name: 'invoice_discount_type',
+    type: 'enum',
+    enum: DiscountType,
+    default: DiscountType.NONE,
+  })
+  invoiceDiscountType!: DiscountType;
+
+  @Column({
+    name: 'invoice_discount_value',
+    type: 'numeric',
+    precision: 14,
+    scale: 2,
+    transformer: decimalTransformer,
+    default: 0,
+  })
+  invoiceDiscountValue!: number;
+
+  @Column({
+    name: 'invoice_tax_rate',
+    type: 'numeric',
+    precision: 5,
+    scale: 2,
+    nullable: true,
+    transformer: decimalTransformer,
+  })
+  invoiceTaxRate!: number | null;
+
+  @Column({
+    name: 'invoice_tax_method',
+    type: 'enum',
+    enum: TaxMethod,
+    nullable: true,
+  })
+  invoiceTaxMethod!: TaxMethod | null;
 
   @Column({
     name: 'paid_amount',
@@ -77,6 +167,44 @@ export class Sale {
   })
   dueAmount!: number;
 
+  @Column({
+    name: 'paid_total',
+    type: 'numeric',
+    precision: 14,
+    scale: 2,
+    default: 0,
+    transformer: decimalTransformer,
+  })
+  paidTotal!: number;
+
+  @Column({
+    name: 'due_total',
+    type: 'numeric',
+    precision: 14,
+    scale: 2,
+    default: 0,
+    transformer: decimalTransformer,
+  })
+  dueTotal!: number;
+
+  @Column({
+    name: 'refunded_total',
+    type: 'numeric',
+    precision: 14,
+    scale: 2,
+    default: 0,
+    transformer: decimalTransformer,
+  })
+  refundedTotal!: number;
+
+  @Column({
+    name: 'status',
+    type: 'enum',
+    enum: SaleStatus,
+    default: SaleStatus.UNPAID,
+  })
+  status!: SaleStatus;
+
   @ManyToOne(() => BranchEntity, {
     nullable: true,
     eager: true,
@@ -90,6 +218,9 @@ export class Sale {
 
   @OneToMany(() => SaleItem, (item) => item.sale)
   items!: SaleItem[];
+
+  @OneToMany(() => SalePayment, (payment) => payment.sale)
+  payments!: SalePayment[];
 
   @OneToMany(() => SalesReturn, (salesReturn) => salesReturn.originalSale)
   salesReturns!: SalesReturn[];

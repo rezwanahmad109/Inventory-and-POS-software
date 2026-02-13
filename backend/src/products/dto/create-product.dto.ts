@@ -9,7 +9,10 @@ import {
   IsUUID,
   MaxLength,
   Min,
+  IsEnum,
 } from 'class-validator';
+
+import { TaxMethod } from '../../common/enums/tax-method.enum';
 
 export class CreateProductDto {
   @ApiProperty({ example: 'Wireless Barcode Scanner' })
@@ -23,6 +26,12 @@ export class CreateProductDto {
   @IsNotEmpty()
   @MaxLength(80)
   sku!: string;
+
+  @ApiPropertyOptional({ example: '1234567890123' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(80)
+  barcode?: string;
 
   @ApiProperty({ example: '0f8fad5b-d9cb-469f-a165-70867728950e' })
   @IsUUID()
@@ -39,6 +48,18 @@ export class CreateProductDto {
   @IsNumber({ maxDecimalPlaces: 2 })
   @Min(0)
   price!: number;
+
+  @ApiPropertyOptional({ example: 5.0 })
+  @Type(() => Number)
+  @IsOptional()
+  @IsNumber({ maxDecimalPlaces: 2 })
+  @Min(0)
+  taxRate?: number;
+
+  @ApiPropertyOptional({ enum: TaxMethod, default: TaxMethod.EXCLUSIVE })
+  @IsOptional()
+  @IsEnum(TaxMethod)
+  taxMethod?: TaxMethod;
 
   @ApiProperty({ example: 18 })
   @Type(() => Number)
