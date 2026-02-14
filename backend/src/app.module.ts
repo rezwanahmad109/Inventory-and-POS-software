@@ -5,6 +5,7 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { AuthModule } from './auth/auth.module';
 import { BranchesModule } from './branches/branches.module';
 import { CategoriesModule } from './categories/categories.module';
+import { CashflowModule } from './cashflow/cashflow.module';
 import { CustomersModule } from './customers/customers.module';
 import { DashboardModule } from './dashboard/dashboard.module';
 import { DatabaseModule } from './database/database.module';
@@ -14,6 +15,7 @@ import { BankStatementLine } from './database/entities/bank-statement-line.entit
 import { BranchEntity } from './database/entities/branch.entity';
 import { BranchProductEntity } from './database/entities/branch-product.entity';
 import { Customer } from './database/entities/customer.entity';
+import { ExpenseCategory } from './database/entities/expense-category.entity';
 import { Expense } from './database/entities/expense.entity';
 import { FinanceAccount } from './database/entities/finance-account.entity';
 import { FinanceInvoice } from './database/entities/finance-invoice.entity';
@@ -25,8 +27,10 @@ import { JournalEntry, JournalLine } from './database/entities/journal-entry.ent
 import { Payment } from './database/entities/payment.entity';
 import { PaymentAllocation } from './database/entities/payment-allocation.entity';
 import { Permission } from './database/entities/permission.entity';
+import { PosOrder } from './database/entities/pos-order.entity';
 import { Category, Product, Unit } from './database/entities/product.entity';
 import { PurchaseItem } from './database/entities/purchase-item.entity';
+import { PurchasePayment } from './database/entities/purchase-payment.entity';
 import { PurchaseReturn } from './database/entities/purchase-return.entity';
 import { PurchaseReturnItem } from './database/entities/purchase-return-item.entity';
 import { Purchase } from './database/entities/purchase.entity';
@@ -52,6 +56,7 @@ import { PermissionsModule } from './permissions/permissions.module';
 import { PurchaseModule } from './purchase/purchase.module';
 import { PurchaseReturnModule } from './purchase-return/purchase-return.module';
 import { ProductsModule } from './products/products.module';
+import { PosModule } from './pos/pos.module';
 import { ReportsModule } from './reports/reports.module';
 import { RolesModule } from './roles/roles.module';
 import { SalesModule } from './sales/sales.module';
@@ -96,6 +101,7 @@ import { validateEnv } from './config/env.validation';
             Permission,
             RolePermission,
             UserRole,
+            PosOrder,
             Product,
             Category,
             Unit,
@@ -112,8 +118,10 @@ import { validateEnv } from './config/env.validation';
             SalesReturnPayment,
             Purchase,
             PurchaseItem,
+            PurchasePayment,
             PurchaseReturn,
             PurchaseReturnItem,
+            ExpenseCategory,
             Expense,
             Setting,
             Customer,
@@ -143,7 +151,9 @@ import { validateEnv } from './config/env.validation';
     UsersModule,
     AuthModule,
     ProductsModule,
+    PosModule,
     BranchesModule,
+    CashflowModule,
     CategoriesModule,
     UnitsModule,
     ReportsModule,

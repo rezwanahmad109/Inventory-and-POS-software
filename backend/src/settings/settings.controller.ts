@@ -13,9 +13,12 @@ import { RolesGuard } from '../common/guards/roles.guard';
 import { Setting } from '../database/entities/setting.entity';
 import {
   AuditLogQueryDto,
+  UpdateCurrenciesDto,
   UpdateBusinessProfileDto,
   UpdateDiscountRulesDto,
+  UpdateEmailNotificationSettingsDto,
   UpdateInvoiceTemplateDto,
+  UpdatePaymentModesDto,
   UpdateStockPolicyDto,
   UpdateTaxSettingsDto,
 } from './dto/settings-sections.dto';
@@ -97,6 +100,44 @@ export class SettingsController {
   @Permissions('settings.update')
   async updateStockPolicy(@Body() dto: UpdateStockPolicyDto) {
     return this.settingsService.updateStockPolicy(dto);
+  }
+
+  @Get('currencies')
+  @Permissions('settings.read')
+  async getCurrencies() {
+    return this.settingsService.getCurrencies();
+  }
+
+  @Put('currencies')
+  @Permissions('settings.update')
+  async updateCurrencies(@Body() dto: UpdateCurrenciesDto) {
+    return this.settingsService.updateCurrencies(dto);
+  }
+
+  @Get('payment-modes')
+  @Permissions('settings.read')
+  async getPaymentModes() {
+    return this.settingsService.getPaymentModes();
+  }
+
+  @Put('payment-modes')
+  @Permissions('settings.update')
+  async updatePaymentModes(@Body() dto: UpdatePaymentModesDto) {
+    return this.settingsService.updatePaymentModes(dto);
+  }
+
+  @Get('email-notifications')
+  @Permissions('settings.read')
+  async getEmailNotificationSettings() {
+    return this.settingsService.getEmailNotificationSettings();
+  }
+
+  @Put('email-notifications')
+  @Permissions('settings.update')
+  async updateEmailNotificationSettings(
+    @Body() dto: UpdateEmailNotificationSettingsDto,
+  ) {
+    return this.settingsService.updateEmailNotificationSettings(dto);
   }
 
   @Get('audit-logs')

@@ -22,6 +22,7 @@ import { RolesGuard } from '../common/guards/roles.guard';
 import { RequestUser } from '../common/interfaces/request-user.interface';
 import { AssignUserRolesDto } from './dto/assign-user-roles.dto';
 import { CreateUserDto } from './dto/create-user.dto';
+import { ImportUsersDto } from './dto/import-users.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
 import { UsersService } from './users.service';
 
@@ -63,6 +64,16 @@ export class UsersController {
     @Req() request: AuthenticatedRequest,
   ) {
     return this.usersService.createManagedUser(createUserDto, request.user.userId);
+  }
+
+  @Post('users/import')
+  @Permissions('users.create')
+  @ApiOperation({ summary: 'Bulk import users' })
+  async importUsers(
+    @Body() importUsersDto: ImportUsersDto,
+    @Req() request: AuthenticatedRequest,
+  ) {
+    return this.usersService.importUsers(importUsersDto, request.user.userId);
   }
 
   @Patch('users/:id')

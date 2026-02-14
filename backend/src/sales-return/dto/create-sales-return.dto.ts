@@ -3,12 +3,17 @@ import {
   ArrayMinSize,
   ArrayUnique,
   IsArray,
+  IsEnum,
   IsNotEmpty,
+  IsObject,
   IsOptional,
   IsPositive,
+  IsString,
   IsUUID,
+  MaxLength,
   ValidateNested,
 } from 'class-validator';
+import { SalePaymentMethod } from '../../common/enums/sale-payment-method.enum';
 
 export class CreateSalesReturnItemDto {
   @IsNotEmpty()
@@ -39,4 +44,32 @@ export class CreateSalesReturnDto {
   @ValidateNested({ each: true })
   @Type(() => CreateSalesReturnItemDto)
   items!: CreateSalesReturnItemDto[];
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(1000)
+  note?: string;
+
+  @IsOptional()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => CreateSalesReturnPaymentDto)
+  refundPayments?: CreateSalesReturnPaymentDto[];
+}
+
+export class CreateSalesReturnPaymentDto {
+  @IsEnum(SalePaymentMethod)
+  method!: SalePaymentMethod;
+
+  @IsPositive()
+  amount!: number;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(120)
+  reference?: string;
+
+  @IsOptional()
+  @IsObject()
+  meta?: Record<string, unknown>;
 }

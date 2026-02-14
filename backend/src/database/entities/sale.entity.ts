@@ -8,9 +8,13 @@ import {
   OneToMany,
   PrimaryGeneratedColumn,
   Unique,
+  UpdateDateColumn,
 } from 'typeorm';
 
 import { DiscountType } from '../../common/enums/discount-type.enum';
+import { QuotationStatus } from '../../common/enums/quotation-status.enum';
+import { SaleDocumentType } from '../../common/enums/sale-document-type.enum';
+import { SalePaymentMethod } from '../../common/enums/sale-payment-method.enum';
 import { SaleStatus } from '../../common/enums/sale-status.enum';
 import { TaxMethod } from '../../common/enums/tax-method.enum';
 import { decimalTransformer } from '../../common/transformers/decimal.transformer';
@@ -56,10 +60,35 @@ export class Sale {
   @Column({
     name: 'payment_method',
     type: 'enum',
-    enum: ['cash', 'card', 'mobile'],
+    enum: SalePaymentMethod,
     nullable: true,
   })
-  paymentMethod!: 'cash' | 'card' | 'mobile' | null;
+  paymentMethod!: SalePaymentMethod | null;
+
+  @Column({
+    name: 'document_type',
+    type: 'enum',
+    enum: SaleDocumentType,
+    default: SaleDocumentType.INVOICE,
+  })
+  documentType!: SaleDocumentType;
+
+  @Column({
+    name: 'quotation_status',
+    type: 'enum',
+    enum: QuotationStatus,
+    nullable: true,
+  })
+  quotationStatus!: QuotationStatus | null;
+
+  @Column({ name: 'valid_until', type: 'date', nullable: true })
+  validUntil!: Date | null;
+
+  @Column({ name: 'converted_at', type: 'timestamptz', nullable: true })
+  convertedAt!: Date | null;
+
+  @Column({ name: 'converted_to_sale_id', type: 'uuid', nullable: true })
+  convertedToSaleId!: string | null;
 
   @Column({
     name: 'total_amount',
@@ -110,6 +139,16 @@ export class Sale {
     default: 0,
   })
   grandTotal!: number;
+
+  @Column({
+    name: 'shipping_total',
+    type: 'numeric',
+    precision: 14,
+    scale: 2,
+    transformer: decimalTransformer,
+    default: 0,
+  })
+  shippingTotal!: number;
 
   @Column({
     name: 'invoice_discount_type',
@@ -236,6 +275,12 @@ export class Sale {
   @Column({ name: 'created_by_user_id', nullable: true })
   createdByUserId!: string | null;
 
+  @Column({ type: 'text', nullable: true })
+  notes!: string | null;
+
   @CreateDateColumn({ name: 'created_at' })
   createdAt!: Date;
+
+  @UpdateDateColumn({ name: 'updated_at' })
+  updatedAt!: Date;
 }

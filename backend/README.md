@@ -50,6 +50,10 @@ Secure, modular NestJS backend for Inventory and POS operations.
   - Auto-decrements stock in transaction
 - `GET /sales` (Admin, Manager, Cashier)
 - `GET /sales/:id` (Admin, Manager, Cashier)
+- `PUT /sales/:id` (update invoice/quotation with stock rollback/reapply)
+- `DELETE /sales/:id`
+- `POST /sales/:id/payments` (partial/full payment tracking)
+- `POST /sales/:id/convert` (quotation -> invoice)
 
 ## Purchase API
 - `POST /purchases` (JWT protected)
@@ -58,8 +62,43 @@ Secure, modular NestJS backend for Inventory and POS operations.
   - Auto-increments stock in transaction
 - `GET /purchases` (JWT protected)
 - `GET /purchases/:id` (JWT protected)
+- `PUT /purchases/:id`
+- `POST /purchases/:id/payments`
+- `POST /purchases/:id/convert` (estimate -> bill)
 - `DELETE /purchases/:id` (JWT protected)
   - Reverses stock-in quantities before delete
+
+## POS API
+- `GET /pos/products/search`
+- `POST /pos/orders`
+- `PUT /pos/orders/:id`
+- `POST /pos/orders/:id/hold`
+- `POST /pos/orders/:id/resume`
+- `POST /pos/orders/:id/checkout`
+- `GET /pos/orders/:id/receipt`
+
+## Cashflow API
+- `POST /incoming-payments/sales/:saleId`
+- `POST /outgoing-payments/purchases/:purchaseId`
+- `POST /outgoing-payments/expenses/:expenseId`
+
+## Wallet / Account Ledger API
+- `GET /api/wallets`
+- `GET /api/wallets/:walletId/transactions`
+- `POST /api/wallets/:walletId/top-up`
+- `POST /api/wallets/:walletId/withdraw`
+- `POST /api/wallets/transfer`
+
+## Reporting API
+- `GET /reports/sales-summary`
+- `GET /reports/purchase-summary`
+- `GET /reports/stock-summary`
+- `GET /reports/rate-list`
+- `GET /reports/product-sales-summary`
+- `GET /reports/users-report`
+- `GET /reports/expense-summary`
+- `GET /reports/profit-loss`
+- Supports `format=json|csv|pdf` and returns download URLs for exported files.
 
 ## Database Entities
 - `Role`

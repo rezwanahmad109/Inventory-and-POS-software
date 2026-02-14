@@ -6,6 +6,7 @@ import { Product } from '../database/entities/product.entity';
 import { Purchase } from '../database/entities/purchase.entity';
 import { PurchaseReturn } from '../database/entities/purchase-return.entity';
 import { PurchaseReturnItem } from '../database/entities/purchase-return-item.entity';
+import { Supplier } from '../database/entities/supplier.entity';
 import { PurchaseReturnController } from './purchase-return.controller';
 import { PurchaseReturnService } from './purchase-return.service';
 
@@ -16,6 +17,7 @@ import { PurchaseReturnService } from './purchase-return.service';
       PurchaseReturnItem,
       Purchase,
       Product,
+      Supplier,
     ]),
     BranchesModule,
   ],

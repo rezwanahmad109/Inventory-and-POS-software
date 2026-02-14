@@ -6,7 +6,9 @@ import {
   IsNotEmpty,
   IsOptional,
   IsPositive,
+  IsString,
   IsUUID,
+  MaxLength,
   ValidateNested,
 } from 'class-validator';
 
@@ -39,4 +41,9 @@ export class CreatePurchaseReturnDto {
   @ValidateNested({ each: true })
   @Type(() => CreatePurchaseReturnItemDto)
   items!: CreatePurchaseReturnItemDto[];
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(1000)
+  note?: string;
 }

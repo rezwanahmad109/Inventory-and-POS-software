@@ -60,4 +60,16 @@ export class UpdateSettingsDto {
   @IsOptional()
   @IsObject()
   stockPolicy?: Record<string, unknown>;
+
+  @IsOptional()
+  @IsArray()
+  currencies?: unknown[];
+
+  @IsOptional()
+  @IsArray()
+  paymentModes?: unknown[];
+
+  @IsOptional()
+  @IsObject()
+  emailNotificationSettings?: Record<string, unknown>;
 }

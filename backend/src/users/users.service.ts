@@ -16,6 +16,7 @@ import { User } from '../database/entities/user.entity';
 import { UserRole } from '../database/entities/user-role.entity';
 import { AssignUserRolesDto } from './dto/assign-user-roles.dto';
 import { CreateUserDto } from './dto/create-user.dto';
+import { ImportUsersDto } from './dto/import-users.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
 import { UserStatus } from './dto/user-status.enum';
 
@@ -125,6 +126,62 @@ export class UsersService {
     );
 
     return this.findManagedUserById(savedUser.id);
+  }
+
+  async importUsers(
+    importUsersDto: ImportUsersDto,
+    createdByUserId: string,
+  ): Promise<{
+    imported: number;
+    skipped: number;
+    failed: number;
+    errors: string[];
+  }> {
+    let imported = 0;
+    let skipped = 0;
+    let failed = 0;
+    const errors: string[] = [];
+    const skipDuplicates = importUsersDto.skipDuplicates !== false;
+
+    for (const [index, userRow] of importUsersDto.users.entries()) {
+      try {
+        const existing = await this.usersRepository
+          .createQueryBuilder('user')
+          .where('LOWER(user.email) = :email', {
+            email: userRow.email.toLowerCase().trim(),
+          })
+          .getOne();
+
+        if (existing) {
+          if (skipDuplicates) {
+            skipped += 1;
+            continue;
+          }
+          throw new ConflictException(
+            `User with email "${userRow.email}" already exists.`,
+          );
+        }
+
+        await this.createManagedUser(
+          {
+            name: userRow.name,
+            email: userRow.email,
+            password: userRow.password,
+            roleId: userRow.roleId,
+            status: UserStatus.ACTIVE,
+          },
+          createdByUserId,
+        );
+        imported += 1;
+      } catch (error) {
+        failed += 1;
+        errors.push(
+          `Row ${index + 1}: ${error instanceof Error ? error.message : 'Unknown error'}`,
+        );
+      }
+    }
+
+    return { imported, skipped, failed, errors };
   }
 
   async updateManagedUser(

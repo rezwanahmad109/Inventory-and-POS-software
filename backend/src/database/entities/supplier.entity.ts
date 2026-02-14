@@ -7,6 +7,7 @@ import {
 } from 'typeorm';
 
 import { Purchase } from './purchase.entity';
+import { decimalTransformer } from '../../common/transformers/decimal.transformer';
 
 @Entity({ name: 'suppliers' })
 export class Supplier {
@@ -27,6 +28,16 @@ export class Supplier {
 
   @Column({ type: 'text', nullable: true })
   address!: string | null;
+
+  @Column({
+    name: 'total_payable',
+    type: 'numeric',
+    precision: 14,
+    scale: 2,
+    transformer: decimalTransformer,
+    default: 0,
+  })
+  totalPayable!: number;
 
   @OneToMany(() => Purchase, (purchase) => purchase.supplier)
   purchases!: Purchase[];

@@ -1,8 +1,14 @@
-import { Injectable } from '@nestjs/common';
+import {
+  ConflictException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 
 import { FinanceAccount } from '../../database/entities/finance-account.entity';
+import { CreateFinanceAccountDto } from '../dto/create-finance-account.dto';
+import { UpdateFinanceAccountDto } from '../dto/update-finance-account.dto';
 
 const DEFAULT_CHART_OF_ACCOUNTS: Array<
   Pick<FinanceAccount, 'code' | 'name' | 'accountType' | 'subType' | 'isContra'>
@@ -50,8 +56,76 @@ export class ChartOfAccountsService {
 
   async findAll(): Promise<FinanceAccount[]> {
     return this.financeAccountRepository.find({
-      where: { isActive: true },
       order: { code: 'ASC' },
     });
+  }
+
+  async create(dto: CreateFinanceAccountDto): Promise<FinanceAccount> {
+    const code = dto.code.trim().toUpperCase();
+    const existing = await this.financeAccountRepository.findOne({ where: { code } });
+    if (existing) {
+      throw new ConflictException(`Finance account code "${code}" already exists.`);
+    }
+
+    const account = this.financeAccountRepository.create({
+      code,
+      name: dto.name.trim(),
+      accountType: dto.accountType,
+      subType: dto.subType?.trim() ?? null,
+      isContra: dto.isContra ?? false,
+      currency: (dto.currency ?? 'USD').toUpperCase(),
+      isActive: dto.isActive ?? true,
+    });
+
+    return this.financeAccountRepository.save(account);
+  }
+
+  async update(id: string, dto: UpdateFinanceAccountDto): Promise<FinanceAccount> {
+    const account = await this.financeAccountRepository.findOne({ where: { id } });
+    if (!account) {
+      throw new NotFoundException(`Finance account "${id}" not found.`);
+    }
+
+    if (dto.code !== undefined) {
+      const code = dto.code.trim().toUpperCase();
+      if (code !== account.code) {
+        const duplicate = await this.financeAccountRepository.findOne({ where: { code } });
+        if (duplicate) {
+          throw new ConflictException(`Finance account code "${code}" already exists.`);
+        }
+        account.code = code;
+      }
+    }
+
+    if (dto.name !== undefined) {
+      account.name = dto.name.trim();
+    }
+    if (dto.accountType !== undefined) {
+      account.accountType = dto.accountType;
+    }
+    if (dto.subType !== undefined) {
+      account.subType = dto.subType?.trim() ?? null;
+    }
+    if (dto.isContra !== undefined) {
+      account.isContra = dto.isContra;
+    }
+    if (dto.currency !== undefined) {
+      account.currency = dto.currency.toUpperCase();
+    }
+    if (dto.isActive !== undefined) {
+      account.isActive = dto.isActive;
+    }
+
+    return this.financeAccountRepository.save(account);
+  }
+
+  async remove(id: string): Promise<void> {
+    const account = await this.financeAccountRepository.findOne({ where: { id } });
+    if (!account) {
+      throw new NotFoundException(`Finance account "${id}" not found.`);
+    }
+
+    account.isActive = false;
+    await this.financeAccountRepository.save(account);
   }
 }

@@ -181,8 +181,95 @@ export class AuditLogQueryDto {
   limit?: number;
 }
 
+export class CurrencySettingDto {
+  @IsString()
+  @MinLength(1)
+  code!: string;
+
+  @IsString()
+  @MinLength(1)
+  symbol!: string;
+
+  @IsIn(['left', 'right'])
+  position!: 'left' | 'right';
+
+  @IsOptional()
+  @IsBoolean()
+  isDefault?: boolean;
+}
+
+export class UpdateCurrenciesDto {
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => CurrencySettingDto)
+  currencies!: CurrencySettingDto[];
+}
+
+export class PaymentModeSettingDto {
+  @IsString()
+  @MinLength(1)
+  code!: string;
+
+  @IsString()
+  @MinLength(1)
+  name!: string;
+
+  @IsOptional()
+  @IsBoolean()
+  isActive?: boolean;
+}
+
+export class UpdatePaymentModesDto {
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => PaymentModeSettingDto)
+  paymentModes!: PaymentModeSettingDto[];
+}
+
+export class UpdateEmailNotificationSettingsDto {
+  @IsOptional()
+  @IsBoolean()
+  enabled?: boolean;
+
+  @IsOptional()
+  @IsString()
+  senderName?: string;
+
+  @IsOptional()
+  @IsEmail()
+  senderEmail?: string;
+
+  @IsOptional()
+  @IsString()
+  smtpHost?: string;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  @Max(65535)
+  smtpPort?: number;
+
+  @IsOptional()
+  @IsBoolean()
+  useTls?: boolean;
+}
+
 export class ExportQueryDto {
   @IsOptional()
-  @IsIn(['settings', 'tax', 'discount_rules', 'inventory_low_stock'])
-  dataset?: 'settings' | 'tax' | 'discount_rules' | 'inventory_low_stock';
+  @IsIn([
+    'settings',
+    'tax',
+    'discount_rules',
+    'inventory_low_stock',
+    'currencies',
+    'payment_modes',
+  ])
+  dataset?:
+    | 'settings'
+    | 'tax'
+    | 'discount_rules'
+    | 'inventory_low_stock'
+    | 'currencies'
+    | 'payment_modes';
 }

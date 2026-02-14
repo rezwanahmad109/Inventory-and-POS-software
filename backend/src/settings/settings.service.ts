@@ -12,19 +12,27 @@ import { AuditLog } from '../database/entities/audit-log.entity';
 import { BranchProductEntity } from '../database/entities/branch-product.entity';
 import {
   BusinessProfileSetting,
+  CurrencySetting,
   DiscountRuleSetting,
+  EmailNotificationSetting,
   InvoiceTemplateSetting,
+  PaymentModeSetting,
   Setting,
   StockPolicySetting,
   TaxRateSetting,
 } from '../database/entities/setting.entity';
 import {
   AuditLogQueryDto,
+  CurrencySettingDto,
   DiscountRuleDto,
   ExportQueryDto,
+  PaymentModeSettingDto,
   UpdateBusinessProfileDto,
+  UpdateCurrenciesDto,
   UpdateDiscountRulesDto,
+  UpdateEmailNotificationSettingsDto,
   UpdateInvoiceTemplateDto,
+  UpdatePaymentModesDto,
   UpdateStockPolicyDto,
   UpdateTaxSettingsDto,
 } from './dto/settings-sections.dto';
@@ -107,6 +115,27 @@ export class SettingsService implements OnModuleInit {
       );
     }
 
+    if (dto.currencies) {
+      settings.currencies = this.normalizeCurrencies(
+        dto.currencies as Array<Partial<CurrencySetting>>,
+      );
+      const defaultCurrency = settings.currencies.find((currency) => currency.isDefault);
+      settings.currency = defaultCurrency?.code ?? settings.currency;
+    }
+
+    if (dto.paymentModes) {
+      settings.paymentModes = this.normalizePaymentModes(
+        dto.paymentModes as Array<Partial<PaymentModeSetting>>,
+      );
+    }
+
+    if (dto.emailNotificationSettings) {
+      settings.emailNotificationSettings = this.mergeEmailNotificationSettings(
+        settings,
+        dto.emailNotificationSettings as Partial<EmailNotificationSetting>,
+      );
+    }
+
     return this.settingsRepository.save(settings);
   }
 
@@ -180,6 +209,51 @@ export class SettingsService implements OnModuleInit {
     return settings.stockPolicy;
   }
 
+  async getCurrencies(): Promise<CurrencySetting[]> {
+    const settings = await this.getOrCreateSettings();
+    return this.resolveCurrencies(settings);
+  }
+
+  async updateCurrencies(dto: UpdateCurrenciesDto): Promise<CurrencySetting[]> {
+    const settings = await this.getOrCreateSettings();
+    settings.currencies = this.normalizeCurrencies(dto.currencies);
+    const defaultCurrency = settings.currencies.find((currency) => currency.isDefault);
+    settings.currency = defaultCurrency?.code ?? settings.currency;
+    await this.settingsRepository.save(settings);
+    return settings.currencies;
+  }
+
+  async getPaymentModes(): Promise<PaymentModeSetting[]> {
+    const settings = await this.getOrCreateSettings();
+    return this.resolvePaymentModes(settings);
+  }
+
+  async updatePaymentModes(
+    dto: UpdatePaymentModesDto,
+  ): Promise<PaymentModeSetting[]> {
+    const settings = await this.getOrCreateSettings();
+    settings.paymentModes = this.normalizePaymentModes(dto.paymentModes);
+    await this.settingsRepository.save(settings);
+    return settings.paymentModes;
+  }
+
+  async getEmailNotificationSettings(): Promise<EmailNotificationSetting> {
+    const settings = await this.getOrCreateSettings();
+    return this.resolveEmailNotificationSettings(settings);
+  }
+
+  async updateEmailNotificationSettings(
+    dto: UpdateEmailNotificationSettingsDto,
+  ): Promise<EmailNotificationSetting> {
+    const settings = await this.getOrCreateSettings();
+    settings.emailNotificationSettings = this.mergeEmailNotificationSettings(
+      settings,
+      dto,
+    );
+    await this.settingsRepository.save(settings);
+    return settings.emailNotificationSettings;
+  }
+
   async getAuditLogs(query: AuditLogQueryDto): Promise<AuditLog[]> {
     const qb = this.auditLogsRepository
       .createQueryBuilder('audit')
@@ -239,12 +313,24 @@ export class SettingsService implements OnModuleInit {
             currency: settings.currency,
             taxRate: settings.taxRate,
           },
+          {
+            section: 'currencies',
+            values: this.resolveCurrencies(settings),
+          },
+          {
+            section: 'payment_modes',
+            values: this.resolvePaymentModes(settings),
+          },
         ];
       }
       case 'tax':
         return (await this.getTaxSettings()).map((rate) => ({ ...rate }));
       case 'discount_rules':
         return (await this.getDiscountRules()).map((rule) => ({ ...rule }));
+      case 'currencies':
+        return (await this.getCurrencies()).map((currency) => ({ ...currency }));
+      case 'payment_modes':
+        return (await this.getPaymentModes()).map((mode) => ({ ...mode }));
       case 'inventory_low_stock': {
         const rows = await this.branchProductsRepository
           .createQueryBuilder('branchProduct')
@@ -283,6 +369,9 @@ export class SettingsService implements OnModuleInit {
       taxSettings: null,
       discountRules: null,
       stockPolicy: null,
+      currencies: null,
+      paymentModes: null,
+      emailNotificationSettings: null,
     });
 
     this.applyDefaultSections(settings);
@@ -310,6 +399,18 @@ export class SettingsService implements OnModuleInit {
     }
     if (!settings.stockPolicy) {
       settings.stockPolicy = this.defaultStockPolicy();
+      updated = true;
+    }
+    if (!settings.currencies) {
+      settings.currencies = this.defaultCurrencies(settings);
+      updated = true;
+    }
+    if (!settings.paymentModes) {
+      settings.paymentModes = this.defaultPaymentModes();
+      updated = true;
+    }
+    if (!settings.emailNotificationSettings) {
+      settings.emailNotificationSettings = this.defaultEmailNotificationSettings();
       updated = true;
     }
 
@@ -353,6 +454,23 @@ export class SettingsService implements OnModuleInit {
 
   private resolveStockPolicy(settings: Setting): StockPolicySetting {
     return settings.stockPolicy ?? this.defaultStockPolicy();
+  }
+
+  private resolveCurrencies(settings: Setting): CurrencySetting[] {
+    return settings.currencies ?? this.defaultCurrencies(settings);
+  }
+
+  private resolvePaymentModes(settings: Setting): PaymentModeSetting[] {
+    return settings.paymentModes ?? this.defaultPaymentModes();
+  }
+
+  private resolveEmailNotificationSettings(
+    settings: Setting,
+  ): EmailNotificationSetting {
+    return (
+      settings.emailNotificationSettings ??
+      this.defaultEmailNotificationSettings()
+    );
   }
 
   private mergeBusinessProfile(
@@ -455,6 +573,85 @@ export class SettingsService implements OnModuleInit {
     };
   }
 
+  private normalizeCurrencies(
+    currencies: Array<Partial<CurrencySetting> | CurrencySettingDto>,
+  ): CurrencySetting[] {
+    if (currencies.length === 0) {
+      return [
+        {
+          code: 'USD',
+          symbol: '$',
+          position: 'left',
+          isDefault: true,
+        },
+      ];
+    }
+
+    const normalized: CurrencySetting[] = currencies.map((currency, index) => ({
+      code: this.normalizeRequiredString(currency.code, 'USD').toUpperCase(),
+      symbol: this.normalizeRequiredString(currency.symbol, '$'),
+      position: currency.position === 'right' ? 'right' : 'left',
+      isDefault: currency.isDefault ?? index === 0,
+    }));
+
+    const hasDefault = normalized.some((currency) => currency.isDefault);
+    if (!hasDefault) {
+      normalized[0].isDefault = true;
+    } else {
+      let firstDefaultIndex = -1;
+      normalized.forEach((currency, index) => {
+        if (currency.isDefault && firstDefaultIndex === -1) {
+          firstDefaultIndex = index;
+          return;
+        }
+        if (currency.isDefault) {
+          currency.isDefault = false;
+        }
+      });
+    }
+
+    return normalized;
+  }
+
+  private normalizePaymentModes(
+    paymentModes: Array<Partial<PaymentModeSetting> | PaymentModeSettingDto>,
+  ): PaymentModeSetting[] {
+    if (paymentModes.length === 0) {
+      return this.defaultPaymentModes();
+    }
+
+    return paymentModes.map((paymentMode) => ({
+      code: this.normalizeRequiredString(paymentMode.code, 'cash').toLowerCase(),
+      name: this.normalizeRequiredString(paymentMode.name, 'Cash'),
+      isActive: paymentMode.isActive !== false,
+    }));
+  }
+
+  private mergeEmailNotificationSettings(
+    settings: Setting,
+    patch: Partial<EmailNotificationSetting>,
+  ): EmailNotificationSetting {
+    const current = this.resolveEmailNotificationSettings(settings);
+
+    return {
+      enabled: patch.enabled ?? current.enabled,
+      senderName: this.normalizeNullableString(
+        patch.senderName,
+        current.senderName,
+      ),
+      senderEmail: this.normalizeNullableString(
+        patch.senderEmail,
+        current.senderEmail,
+      ),
+      smtpHost: this.normalizeNullableString(patch.smtpHost, current.smtpHost),
+      smtpPort:
+        patch.smtpPort !== undefined && patch.smtpPort !== null
+          ? Math.floor(patch.smtpPort)
+          : current.smtpPort,
+      useTls: patch.useTls ?? current.useTls,
+    };
+  }
+
   private defaultBusinessProfile(settings: Setting): BusinessProfileSetting {
     return {
       businessName: settings.businessName,
@@ -493,6 +690,38 @@ export class SettingsService implements OnModuleInit {
       allowStockTransfers: true,
       allowNegativeStock: false,
       autoReorderEnabled: false,
+    };
+  }
+
+  private defaultCurrencies(settings: Setting): CurrencySetting[] {
+    const defaultCode = settings.currency ?? 'USD';
+    return [
+      {
+        code: defaultCode,
+        symbol: defaultCode === 'USD' ? '$' : defaultCode,
+        position: 'left',
+        isDefault: true,
+      },
+    ];
+  }
+
+  private defaultPaymentModes(): PaymentModeSetting[] {
+    return [
+      { code: 'cash', name: 'Cash', isActive: true },
+      { code: 'bank', name: 'Bank Transfer', isActive: true },
+      { code: 'card', name: 'Card', isActive: true },
+      { code: 'wallet', name: 'Wallet', isActive: true },
+    ];
+  }
+
+  private defaultEmailNotificationSettings(): EmailNotificationSetting {
+    return {
+      enabled: false,
+      senderName: null,
+      senderEmail: null,
+      smtpHost: null,
+      smtpPort: null,
+      useTls: true,
     };
   }
 

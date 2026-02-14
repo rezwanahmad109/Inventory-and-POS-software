@@ -7,6 +7,7 @@ import {
   NotFoundException,
   Param,
   ParseIntPipe,
+  ParseUUIDPipe,
   Post,
   Put,
   Query,
@@ -26,7 +27,9 @@ import { Permissions } from '../common/decorators/permissions.decorator';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
 import { RequestUser } from '../common/interfaces/request-user.interface';
+import { CreateExpenseCategoryDto } from './dto/create-expense-category.dto';
 import { CreateExpenseDto } from './dto/create-expense.dto';
+import { UpdateExpenseCategoryDto } from './dto/update-expense-category.dto';
 import { UpdateExpenseDto } from './dto/update-expense.dto';
 import { ExpensesService } from './expenses.service';
 
@@ -119,5 +122,37 @@ export class ExpensesController {
   @ApiOperation({ summary: 'Soft delete expense' })
   async remove(@Param('id', ParseIntPipe) id: number, @Req() req: AuthenticatedRequest) {
     return this.expensesService.remove(id, req.user);
+  }
+
+  @Get('/categories/list')
+  @Permissions('expenses.read')
+  @ApiOperation({ summary: 'List expense categories' })
+  listCategories() {
+    return this.expensesService.listCategories();
+  }
+
+  @Post('/categories/list')
+  @Permissions('expenses.create')
+  @ApiOperation({ summary: 'Create expense category' })
+  createCategory(@Body() dto: CreateExpenseCategoryDto) {
+    return this.expensesService.createCategory(dto);
+  }
+
+  @Put('/categories/list/:id')
+  @Permissions('expenses.update')
+  @ApiOperation({ summary: 'Update expense category' })
+  updateCategory(
+    @Param('id', new ParseUUIDPipe()) id: string,
+    @Body() dto: UpdateExpenseCategoryDto,
+  ) {
+    return this.expensesService.updateCategory(id, dto);
+  }
+
+  @Delete('/categories/list/:id')
+  @Permissions('expenses.delete')
+  @ApiOperation({ summary: 'Deactivate expense category' })
+  async removeCategory(@Param('id', new ParseUUIDPipe()) id: string) {
+    await this.expensesService.removeCategory(id);
+    return { message: 'Expense category deactivated successfully.' };
   }
 }

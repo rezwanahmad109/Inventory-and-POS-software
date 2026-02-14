@@ -3,6 +3,7 @@ import { Type } from 'class-transformer';
 import {
   ArrayMinSize,
   IsArray,
+  IsDateString,
   IsEnum,
   IsInt,
   IsNumber,
@@ -15,6 +16,8 @@ import {
 } from 'class-validator';
 
 import { DiscountType } from '../../common/enums/discount-type.enum';
+import { QuotationStatus } from '../../common/enums/quotation-status.enum';
+import { SaleDocumentType } from '../../common/enums/sale-document-type.enum';
 import { CreateSaleItemDto } from './create-sale-item.dto';
 import { CreateSalePaymentDto } from './create-sale-payment.dto';
 import { InvoiceTaxOverrideDto } from './invoice-tax-override.dto';
@@ -24,6 +27,24 @@ export class CreateSaleDto {
   @IsOptional()
   @IsUUID()
   branchId?: string;
+
+  @ApiPropertyOptional({ enum: SaleDocumentType, default: SaleDocumentType.INVOICE })
+  @IsOptional()
+  @IsEnum(SaleDocumentType)
+  documentType?: SaleDocumentType;
+
+  @ApiPropertyOptional({
+    enum: QuotationStatus,
+    description: 'Used only when documentType is quotation',
+  })
+  @IsOptional()
+  @IsEnum(QuotationStatus)
+  quotationStatus?: QuotationStatus;
+
+  @ApiPropertyOptional({ example: '2026-03-01' })
+  @IsOptional()
+  @IsDateString()
+  validUntil?: string;
 
   @ApiPropertyOptional({ example: 'Walk-in Customer' })
   @IsOptional()
@@ -78,4 +99,11 @@ export class CreateSaleDto {
   @IsString()
   @MaxLength(1000)
   notes?: string;
+
+  @ApiPropertyOptional({ example: 15 })
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber({ maxDecimalPlaces: 2 })
+  @Min(0)
+  shippingTotal?: number;
 }

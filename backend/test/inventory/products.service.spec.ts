@@ -9,6 +9,9 @@ describe('ProductsService low-stock threshold boundary', () => {
     {} as Repository<Product>,
     {} as Repository<any>,
     {} as Repository<any>,
+    {} as Repository<any>,
+    {} as Repository<any>,
+    {} as any,
   );
 
   it('logs when stock moves from above threshold to exactly threshold', () => {

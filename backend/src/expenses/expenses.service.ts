@@ -4,12 +4,21 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Between, LessThanOrEqual, MoreThanOrEqual, Repository } from 'typeorm';
+import {
+  Between,
+  ILike,
+  LessThanOrEqual,
+  MoreThanOrEqual,
+  Repository,
+} from 'typeorm';
 
 import { RoleName } from '../common/enums/role-name.enum';
 import { RequestUser } from '../common/interfaces/request-user.interface';
+import { ExpenseCategory } from '../database/entities/expense-category.entity';
 import { Expense } from '../database/entities/expense.entity';
+import { CreateExpenseCategoryDto } from './dto/create-expense-category.dto';
 import { CreateExpenseDto } from './dto/create-expense.dto';
+import { UpdateExpenseCategoryDto } from './dto/update-expense-category.dto';
 import { UpdateExpenseDto } from './dto/update-expense.dto';
 
 @Injectable()
@@ -17,13 +26,19 @@ export class ExpensesService {
   constructor(
     @InjectRepository(Expense)
     private readonly expensesRepository: Repository<Expense>,
+    @InjectRepository(ExpenseCategory)
+    private readonly expenseCategoriesRepository: Repository<ExpenseCategory>,
   ) {}
 
   async create(createExpenseDto: CreateExpenseDto, userId: string): Promise<Expense> {
+    const categoryName = await this.ensureCategory(createExpenseDto.category);
+
     const expense = this.expensesRepository.create({
       ...createExpenseDto,
+      category: categoryName,
       date: new Date(createExpenseDto.date),
       note: createExpenseDto.note?.trim() ?? null,
+      attachments: this.normalizeAttachmentUrls(createExpenseDto.attachmentUrls),
       createdById: userId,
     });
 
@@ -90,7 +105,7 @@ export class ExpensesService {
       updateData.title = updateExpenseDto.title.trim();
     }
     if (updateExpenseDto.category !== undefined) {
-      updateData.category = updateExpenseDto.category.trim();
+      updateData.category = await this.ensureCategory(updateExpenseDto.category);
     }
     if (updateExpenseDto.amount !== undefined) {
       updateData.amount = updateExpenseDto.amount;
@@ -103,6 +118,11 @@ export class ExpensesService {
     }
     if (updateExpenseDto.note !== undefined) {
       updateData.note = updateExpenseDto.note?.trim() ?? null;
+    }
+    if ((updateExpenseDto as CreateExpenseDto).attachmentUrls !== undefined) {
+      updateData.attachments = this.normalizeAttachmentUrls(
+        (updateExpenseDto as CreateExpenseDto).attachmentUrls,
+      );
     }
 
     await this.expensesRepository.update(id, updateData);
@@ -118,6 +138,97 @@ export class ExpensesService {
     }
 
     await this.expensesRepository.softDelete(id);
+  }
+
+  async listCategories(): Promise<ExpenseCategory[]> {
+    return this.expenseCategoriesRepository.find({
+      order: { name: 'ASC' },
+    });
+  }
+
+  async createCategory(
+    dto: CreateExpenseCategoryDto,
+  ): Promise<ExpenseCategory> {
+    const existing = await this.expenseCategoriesRepository.findOne({
+      where: { name: ILike(dto.name.trim()) },
+    });
+
+    if (existing) {
+      return existing;
+    }
+
+    const category = this.expenseCategoriesRepository.create({
+      name: dto.name.trim(),
+      description: dto.description?.trim() ?? null,
+      isActive: dto.isActive !== false,
+    });
+    return this.expenseCategoriesRepository.save(category);
+  }
+
+  async updateCategory(
+    id: string,
+    dto: UpdateExpenseCategoryDto,
+  ): Promise<ExpenseCategory> {
+    const category = await this.expenseCategoriesRepository.findOne({ where: { id } });
+    if (!category) {
+      throw new NotFoundException(`Expense category "${id}" not found.`);
+    }
+
+    if (dto.name !== undefined) {
+      category.name = dto.name.trim();
+    }
+    if (dto.description !== undefined) {
+      category.description = dto.description?.trim() ?? null;
+    }
+    if (dto.isActive !== undefined) {
+      category.isActive = dto.isActive;
+    }
+
+    return this.expenseCategoriesRepository.save(category);
+  }
+
+  async removeCategory(id: string): Promise<void> {
+    const category = await this.expenseCategoriesRepository.findOne({ where: { id } });
+    if (!category) {
+      throw new NotFoundException(`Expense category "${id}" not found.`);
+    }
+
+    category.isActive = false;
+    await this.expenseCategoriesRepository.save(category);
+  }
+
+  private normalizeAttachmentUrls(urls?: string[]): string[] | null {
+    if (!urls || urls.length === 0) {
+      return null;
+    }
+
+    const normalized = Array.from(
+      new Set(urls.map((url) => url.trim()).filter((url) => url.length > 0)),
+    );
+    return normalized.length > 0 ? normalized : null;
+  }
+
+  private async ensureCategory(input: string): Promise<string> {
+    const normalized = input.trim();
+    const existing = await this.expenseCategoriesRepository.findOne({
+      where: { name: ILike(normalized) },
+    });
+
+    if (existing) {
+      if (!existing.isActive) {
+        existing.isActive = true;
+        await this.expenseCategoriesRepository.save(existing);
+      }
+      return existing.name;
+    }
+
+    const created = this.expenseCategoriesRepository.create({
+      name: normalized,
+      description: null,
+      isActive: true,
+    });
+    await this.expenseCategoriesRepository.save(created);
+    return created.name;
   }
 
   private canManageExpense(requestUser: RequestUser, expense: Expense): boolean {

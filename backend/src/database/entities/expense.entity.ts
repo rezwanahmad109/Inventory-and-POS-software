@@ -34,6 +34,9 @@ export class Expense {
   @Column({ type: 'text', nullable: true })
   note!: string | null;
 
+  @Column({ type: 'jsonb', nullable: true })
+  attachments!: string[] | null;
+
   @Column({ name: 'paid_by', length: 255 })
   paidBy!: string;
 

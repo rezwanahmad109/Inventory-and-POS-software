@@ -3,12 +3,22 @@ import {
   Injectable,
   Logger,
   NotFoundException,
+  BadRequestException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
+import { DataSource } from 'typeorm';
 import { In, Repository, SelectQueryBuilder } from 'typeorm';
 
+import { StockAdjustmentReason } from '../common/enums/stock-adjustment-reason.enum';
+import {
+  StockLedgerReason,
+  StockLedgerRefType,
+} from '../common/enums/stock-ledger.enum';
+import { AuditLog } from '../database/entities/audit-log.entity';
 import { Category, Product, Unit } from '../database/entities/product.entity';
+import { StockLedgerEntry } from '../database/entities/stock-ledger.entity';
 import { CreateProductDto } from './dto/create-product.dto';
+import { StockAdjustmentDto } from './dto/stock-adjustment.dto';
 import { UpdateProductDto } from './dto/update-product.dto';
 
 export type ProductView = Product & {
@@ -44,14 +54,23 @@ export class ProductsService {
     private readonly categoriesRepository: Repository<Category>,
     @InjectRepository(Unit)
     private readonly unitsRepository: Repository<Unit>,
+    @InjectRepository(StockLedgerEntry)
+    private readonly stockLedgerRepository: Repository<StockLedgerEntry>,
+    @InjectRepository(AuditLog)
+    private readonly auditLogRepository: Repository<AuditLog>,
+    private readonly dataSource: DataSource,
   ) {}
 
   async create(createProductDto: CreateProductDto): Promise<ProductView> {
     const sku = createProductDto.sku.trim();
     const barcode = this.normalizeBarcode(createProductDto.barcode);
+    const additionalBarcodes = this.normalizeAdditionalBarcodes(
+      createProductDto.additionalBarcodes,
+    );
 
     await this.ensureUniqueSku(sku);
     await this.ensureUniqueBarcode(barcode);
+    await this.ensureUniqueAdditionalBarcodes(additionalBarcodes);
 
     const category = await this.getCategoryOrFail(createProductDto.categoryId);
     const unit = await this.getUnitOrFail(createProductDto.unitId);
@@ -59,6 +78,11 @@ export class ProductsService {
     const product = this.productsRepository.create({
       sku,
       barcode,
+      brand: createProductDto.brand?.trim() ?? null,
+      additionalBarcodes,
+      variationAttributes: this.normalizeVariationAttributes(
+        createProductDto.variationAttributes,
+      ),
       name: createProductDto.name.trim(),
       category,
       categoryId: category.id,
@@ -100,7 +124,17 @@ export class ProductsService {
       .createQueryBuilder('product')
       .leftJoinAndSelect('product.category', 'category')
       .leftJoinAndSelect('product.unit', 'unit')
-      .where('LOWER(product.barcode) = LOWER(:barcode)', { barcode: normalizedBarcode })
+      .where('LOWER(product.barcode) = LOWER(:barcode)', {
+        barcode: normalizedBarcode,
+      })
+      .orWhere(
+        `EXISTS (
+          SELECT 1
+          FROM jsonb_array_elements_text(COALESCE(product.additional_barcodes, '[]'::jsonb)) AS extra_barcode
+          WHERE LOWER(extra_barcode) = LOWER(:barcode)
+        )`,
+        { barcode: normalizedBarcode },
+      )
       .getOne();
 
     if (!product) {
@@ -151,6 +185,11 @@ export class ProductsService {
         `
         CASE
           WHEN LOWER(COALESCE(product.barcode, '')) = :exact THEN 120
+          WHEN EXISTS (
+            SELECT 1
+            FROM jsonb_array_elements_text(COALESCE(product.additional_barcodes, '[]'::jsonb)) AS extra_barcode
+            WHERE LOWER(extra_barcode) = :exact
+          ) THEN 118
           WHEN LOWER(product.sku) = :exact THEN 110
           WHEN LOWER(product.sku) LIKE :prefix THEN 100
           WHEN LOWER(COALESCE(product.barcode, '')) LIKE :prefix THEN 95
@@ -165,6 +204,11 @@ export class ProductsService {
         `(
           LOWER(product.sku) LIKE :like
           OR LOWER(COALESCE(product.barcode, '')) LIKE :like
+          OR EXISTS (
+            SELECT 1
+            FROM jsonb_array_elements_text(COALESCE(product.additional_barcodes, '[]'::jsonb)) AS extra_barcode
+            WHERE LOWER(extra_barcode) LIKE :like
+          )
           OR LOWER(product.name) LIKE :like
         )`,
         { like, prefix, exact },
@@ -219,6 +263,24 @@ export class ProductsService {
         await this.ensureUniqueBarcode(barcode, product.id);
       }
       product.barcode = barcode;
+    }
+
+    if (updateProductDto.brand !== undefined) {
+      product.brand = updateProductDto.brand.trim() || null;
+    }
+
+    if (updateProductDto.additionalBarcodes !== undefined) {
+      const additionalBarcodes = this.normalizeAdditionalBarcodes(
+        updateProductDto.additionalBarcodes,
+      );
+      await this.ensureUniqueAdditionalBarcodes(additionalBarcodes, product.id);
+      product.additionalBarcodes = additionalBarcodes;
+    }
+
+    if (updateProductDto.variationAttributes !== undefined) {
+      product.variationAttributes = this.normalizeVariationAttributes(
+        updateProductDto.variationAttributes,
+      );
     }
 
     if (updateProductDto.categoryId !== undefined) {
@@ -286,6 +348,194 @@ export class ProductsService {
     return products.map((product) => this.toProductView(product));
   }
 
+  async exportCsv(filters: ProductFilters = {}): Promise<string> {
+    const products = await this.findAll(filters);
+    const rows = [
+      [
+        'id',
+        'name',
+        'sku',
+        'barcode',
+        'additionalBarcodes',
+        'brand',
+        'categoryId',
+        'unitId',
+        'price',
+        'taxRate',
+        'taxMethod',
+        'stockQty',
+        'lowStockThreshold',
+        'variationAttributes',
+        'description',
+      ],
+      ...products.map((product) => [
+        product.id,
+        product.name,
+        product.sku,
+        product.barcode ?? '',
+        (product.additionalBarcodes ?? []).join('|'),
+        product.brand ?? '',
+        product.categoryId,
+        product.unitId,
+        String(product.price),
+        product.taxRate === null ? '' : String(product.taxRate),
+        product.taxMethod,
+        String(product.stockQty),
+        String(product.lowStockThreshold ?? 0),
+        JSON.stringify(product.variationAttributes ?? {}),
+        product.description ?? '',
+      ]),
+    ];
+
+    return rows
+      .map((row) => row.map((cell) => this.escapeCsvCell(cell)).join(','))
+      .join('\n');
+  }
+
+  async importCsv(
+    csvContent: string,
+  ): Promise<{ imported: number; failed: number; errors: string[] }> {
+    const lines = csvContent
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .filter((line) => line.length > 0);
+
+    if (lines.length < 2) {
+      throw new BadRequestException('CSV must contain a header and at least one data row.');
+    }
+
+    const headers = this.parseCsvLine(lines[0]).map((header) => header.trim());
+    const requiredHeaders = ['name', 'sku', 'categoryId', 'unitId', 'price', 'stockQty'];
+    for (const requiredHeader of requiredHeaders) {
+      if (!headers.includes(requiredHeader)) {
+        throw new BadRequestException(`CSV is missing required column "${requiredHeader}".`);
+      }
+    }
+
+    let imported = 0;
+    let failed = 0;
+    const errors: string[] = [];
+
+    for (let index = 1; index < lines.length; index += 1) {
+      const row = this.parseCsvLine(lines[index]);
+      const rowObject = new Map<string, string>();
+      headers.forEach((header, headerIndex) => {
+        rowObject.set(header, row[headerIndex] ?? '');
+      });
+
+      try {
+        await this.create({
+          name: rowObject.get('name') ?? '',
+          sku: rowObject.get('sku') ?? '',
+          barcode: rowObject.get('barcode') || undefined,
+          additionalBarcodes: (rowObject.get('additionalBarcodes') ?? '')
+            .split('|')
+            .map((barcode) => barcode.trim())
+            .filter((barcode) => barcode.length > 0),
+          brand: rowObject.get('brand') || undefined,
+          categoryId: rowObject.get('categoryId') ?? '',
+          unitId: rowObject.get('unitId') ?? '',
+          price: Number(rowObject.get('price') ?? 0),
+          taxRate:
+            rowObject.get('taxRate') && rowObject.get('taxRate') !== ''
+              ? Number(rowObject.get('taxRate'))
+              : undefined,
+          taxMethod: (rowObject.get('taxMethod') as any) || undefined,
+          stockQty: Number(rowObject.get('stockQty') ?? 0),
+          lowStockThreshold: Number(rowObject.get('lowStockThreshold') ?? 0),
+          variationAttributes: this.safeParseJsonObject(
+            rowObject.get('variationAttributes'),
+          ),
+          description: rowObject.get('description') || undefined,
+          image: rowObject.get('image') || undefined,
+        });
+        imported += 1;
+      } catch (error) {
+        failed += 1;
+        errors.push(
+          `Row ${index + 1}: ${error instanceof Error ? error.message : 'Unknown error'}`,
+        );
+      }
+    }
+
+    return { imported, failed, errors };
+  }
+
+  async adjustStock(
+    productId: string,
+    dto: StockAdjustmentDto,
+    actorId: string | null,
+  ): Promise<ProductView> {
+    if (dto.qtyDelta === 0) {
+      throw new BadRequestException('qtyDelta must not be zero.');
+    }
+
+    return this.dataSource.transaction(async (manager) => {
+      const product = await manager.findOne(Product, {
+        where: { id: productId },
+        lock: { mode: 'pessimistic_write' },
+      });
+
+      if (!product) {
+        throw new NotFoundException(`Product "${productId}" not found.`);
+      }
+
+      const previousStockQty = product.stockQty;
+      const nextStockQty = previousStockQty + dto.qtyDelta;
+      if (nextStockQty < 0) {
+        throw new BadRequestException(
+          `Stock adjustment would make stock negative for "${product.name}".`,
+        );
+      }
+
+      product.stockQty = nextStockQty;
+      await manager.save(Product, product);
+      this.handleStockLevelChange(product, previousStockQty, 'manual_adjustment');
+
+      await manager.save(
+        StockLedgerEntry,
+        manager.create(StockLedgerEntry, {
+          productId: product.id,
+          branchId: dto.branchId ?? null,
+          qtyDelta: dto.qtyDelta,
+          reason: StockLedgerReason.MANUAL_ADJUSTMENT,
+          refType: StockLedgerRefType.PRODUCT,
+          refId: product.id,
+          createdBy: actorId,
+        }),
+      );
+
+      await manager.save(
+        AuditLog,
+        manager.create(AuditLog, {
+          actorId,
+          action: `inventory.adjust.${dto.reason}`,
+          entity: 'products',
+          entityId: product.id,
+          before: {
+            stockQty: previousStockQty,
+          },
+          after: {
+            stockQty: product.stockQty,
+            reason: dto.reason,
+            note: dto.note?.trim() ?? null,
+          },
+          requestId: null,
+          correlationId: null,
+        }),
+      );
+
+      const reloaded = await manager.findOne(Product, {
+        where: { id: product.id },
+        relations: { category: true, unit: true },
+      });
+      if (!reloaded) {
+        throw new NotFoundException(`Product "${product.id}" not found.`);
+      }
+      return this.toProductView(reloaded);
+    });
+  }
+
   markHotItem(productId: string): void {
     const current = this.hotProductCache.get(productId);
     const now = Date.now();
@@ -348,6 +598,41 @@ export class ProductsService {
 
     const trimmed = barcode.trim();
     return trimmed ? trimmed : null;
+  }
+
+  private normalizeAdditionalBarcodes(
+    additionalBarcodes?: string[],
+  ): string[] | null {
+    if (!additionalBarcodes || additionalBarcodes.length === 0) {
+      return null;
+    }
+
+    const normalized = Array.from(
+      new Set(
+        additionalBarcodes
+          .map((barcode) => barcode.trim())
+          .filter((barcode) => barcode.length > 0),
+      ),
+    );
+    return normalized.length > 0 ? normalized : null;
+  }
+
+  private normalizeVariationAttributes(
+    variationAttributes?: Record<string, string>,
+  ): Record<string, string> | null {
+    if (!variationAttributes) {
+      return null;
+    }
+
+    const normalizedEntries = Object.entries(variationAttributes)
+      .map(([key, value]) => [key.trim(), String(value).trim()] as const)
+      .filter(([key, value]) => key.length > 0 && value.length > 0);
+
+    if (normalizedEntries.length === 0) {
+      return null;
+    }
+
+    return Object.fromEntries(normalizedEntries);
   }
 
   private async findOneEntityOrFail(id: string): Promise<Product> {
@@ -457,5 +742,99 @@ export class ProductsService {
     }
 
     throw new ConflictException(`Barcode "${barcode}" already exists.`);
+  }
+
+  private async ensureUniqueAdditionalBarcodes(
+    additionalBarcodes: string[] | null,
+    ignoreProductId?: string,
+  ): Promise<void> {
+    if (!additionalBarcodes || additionalBarcodes.length === 0) {
+      return;
+    }
+
+    for (const barcode of additionalBarcodes) {
+      await this.ensureUniqueBarcode(barcode, ignoreProductId);
+      const duplicate = await this.productsRepository
+        .createQueryBuilder('product')
+        .withDeleted()
+        .where(
+          `EXISTS (
+            SELECT 1
+            FROM jsonb_array_elements_text(COALESCE(product.additional_barcodes, '[]'::jsonb)) AS extra_barcode
+            WHERE LOWER(extra_barcode) = LOWER(:barcode)
+          )`,
+          { barcode },
+        )
+        .andWhere(ignoreProductId ? 'product.id <> :ignoreProductId' : '1=1', {
+          ignoreProductId,
+        })
+        .getOne();
+
+      if (duplicate) {
+        throw new ConflictException(`Barcode "${barcode}" already exists.`);
+      }
+    }
+  }
+
+  private parseCsvLine(line: string): string[] {
+    const values: string[] = [];
+    let current = '';
+    let insideQuotes = false;
+
+    for (let index = 0; index < line.length; index += 1) {
+      const char = line[index];
+
+      if (char === '\"') {
+        const nextChar = line[index + 1];
+        if (insideQuotes && nextChar === '\"') {
+          current += '\"';
+          index += 1;
+        } else {
+          insideQuotes = !insideQuotes;
+        }
+        continue;
+      }
+
+      if (char === ',' && !insideQuotes) {
+        values.push(current);
+        current = '';
+        continue;
+      }
+
+      current += char;
+    }
+
+    values.push(current);
+    return values;
+  }
+
+  private escapeCsvCell(value: string): string {
+    if (value.includes(',') || value.includes('\"') || value.includes('\n')) {
+      return `\"${value.replace(/\"/g, '\"\"')}\"`;
+    }
+    return value;
+  }
+
+  private safeParseJsonObject(input?: string): Record<string, string> | undefined {
+    if (!input || !input.trim()) {
+      return undefined;
+    }
+
+    try {
+      const parsed = JSON.parse(input);
+      if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+        return undefined;
+      }
+
+      return Object.entries(parsed).reduce(
+        (acc, [key, value]) => ({
+          ...acc,
+          [key]: String(value),
+        }),
+        {} as Record<string, string>,
+      );
+    } catch {
+      return undefined;
+    }
   }
 }

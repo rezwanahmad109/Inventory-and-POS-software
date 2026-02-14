@@ -4,13 +4,15 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { DataSource, Repository } from 'typeorm';
+import { DataSource, EntityManager, Repository } from 'typeorm';
 
 import { BranchesService } from '../branches/branches.service';
+import { PurchaseStatus } from '../common/enums/purchase-status.enum';
 import { Product } from '../database/entities/product.entity';
-import { Purchase } from '../database/entities/purchase.entity';
 import { PurchaseReturn } from '../database/entities/purchase-return.entity';
 import { PurchaseReturnItem } from '../database/entities/purchase-return-item.entity';
+import { Purchase } from '../database/entities/purchase.entity';
+import { Supplier } from '../database/entities/supplier.entity';
 import { CreatePurchaseReturnDto } from './dto/create-purchase-return.dto';
 
 /**
@@ -35,12 +37,16 @@ export class PurchaseReturnService {
    * @throws BadRequestException if validation fails
    * @throws NotFoundException if purchase or product not found
    */
-  async create(createPurchaseReturnDto: CreatePurchaseReturnDto): Promise<PurchaseReturn> {
+  async create(
+    createPurchaseReturnDto: CreatePurchaseReturnDto,
+    actorUserId?: string,
+  ): Promise<PurchaseReturn> {
     return this.dataSource.transaction(async (manager) => {
       // Validate original purchase exists
       const originalPurchase = await manager.findOne(Purchase, {
         where: { id: createPurchaseReturnDto.originalPurchaseId },
         relations: { items: true },
+        lock: { mode: 'pessimistic_write' },
       });
 
       if (!originalPurchase) {
@@ -82,8 +88,11 @@ export class PurchaseReturnService {
       const purchaseReturn = manager.create(PurchaseReturn, {
         originalPurchase,
         originalPurchaseId: originalPurchase.id,
+        debitNoteNumber: await this.generateDebitNoteNumber(manager),
         returnDate: createPurchaseReturnDto.returnDate || new Date(),
         totalRefund: 0,
+        note: createPurchaseReturnDto.note?.trim() ?? null,
+        createdByUserId: actorUserId ?? null,
       });
 
       const persistedReturn = await manager.save(PurchaseReturn, purchaseReturn);
@@ -148,6 +157,25 @@ export class PurchaseReturnService {
       persistedReturn.totalRefund = Number(runningTotal.toFixed(2));
       await manager.save(PurchaseReturn, persistedReturn);
 
+      const previousDue = originalPurchase.dueTotal;
+      originalPurchase.dueTotal = Number(
+        Math.max(originalPurchase.dueTotal - persistedReturn.totalRefund, 0).toFixed(2),
+      );
+      originalPurchase.status = this.resolvePurchaseStatus(
+        originalPurchase.paidTotal,
+        originalPurchase.dueTotal,
+      );
+      await manager.save(Purchase, originalPurchase);
+
+      if (previousDue > originalPurchase.dueTotal) {
+        const delta = Number((previousDue - originalPurchase.dueTotal).toFixed(2));
+        await this.adjustSupplierPayable(
+          manager,
+          originalPurchase.supplierId,
+          -delta,
+        );
+      }
+
       const createdReturn = await manager.findOne(PurchaseReturn, {
         where: { id: persistedReturn.id },
         relations: { returnedItems: true },
@@ -189,5 +217,52 @@ export class PurchaseReturnService {
       throw new NotFoundException(`Purchase return "${id}" not found.`);
     }
     return purchaseReturn;
+  }
+
+  private async adjustSupplierPayable(
+    manager: EntityManager,
+    supplierId: string,
+    amountDelta: number,
+  ): Promise<void> {
+    if (amountDelta === 0) {
+      return;
+    }
+
+    await manager
+      .createQueryBuilder()
+      .update(Supplier)
+      .set({ totalPayable: () => `GREATEST(total_payable + ${amountDelta}, 0)` })
+      .where('id = :id', { id: supplierId })
+      .execute();
+  }
+
+  private resolvePurchaseStatus(
+    paidTotal: number,
+    dueTotal: number,
+  ): PurchaseStatus {
+    if (dueTotal <= 0) {
+      return PurchaseStatus.PAID;
+    }
+    if (paidTotal > 0) {
+      return PurchaseStatus.PARTIAL;
+    }
+    return PurchaseStatus.UNPAID;
+  }
+
+  private async generateDebitNoteNumber(manager: EntityManager): Promise<string> {
+    const latest = await manager
+      .createQueryBuilder(PurchaseReturn, 'purchaseReturn')
+      .setLock('pessimistic_write')
+      .orderBy('purchaseReturn.createdAt', 'DESC')
+      .addOrderBy('purchaseReturn.id', 'DESC')
+      .getOne();
+
+    if (!latest) {
+      return 'DN-0001';
+    }
+
+    const match = /^DN-(\d+)$/.exec(latest.debitNoteNumber);
+    const lastNumber = match ? Number(match[1]) : 0;
+    return `DN-${String(lastNumber + 1).padStart(4, '0')}`;
   }
 }

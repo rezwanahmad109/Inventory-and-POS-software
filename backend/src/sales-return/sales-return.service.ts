@@ -4,11 +4,14 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { DataSource, Repository } from 'typeorm';
+import { DataSource, EntityManager, Repository } from 'typeorm';
 
 import { BranchesService } from '../branches/branches.service';
+import { SaleStatus } from '../common/enums/sale-status.enum';
+import { Customer } from '../database/entities/customer.entity';
 import { Product } from '../database/entities/product.entity';
 import { Sale } from '../database/entities/sale.entity';
+import { SalesReturnPayment } from '../database/entities/sales-return-payment.entity';
 import { SalesReturn } from '../database/entities/sales-return.entity';
 import { SalesReturnItem } from '../database/entities/sales-return-item.entity';
 import { CreateSalesReturnDto } from './dto/create-sales-return.dto';
@@ -35,12 +38,16 @@ export class SalesReturnService {
    * @throws BadRequestException if validation fails
    * @throws NotFoundException if sale or product not found
    */
-  async create(createSalesReturnDto: CreateSalesReturnDto): Promise<SalesReturn> {
+  async create(
+    createSalesReturnDto: CreateSalesReturnDto,
+    actorUserId?: string,
+  ): Promise<SalesReturn> {
     return this.dataSource.transaction(async (manager) => {
       // Validate original sale exists
       const originalSale = await manager.findOne(Sale, {
         where: { id: createSalesReturnDto.originalSaleId },
         relations: { items: true },
+        lock: { mode: 'pessimistic_write' },
       });
 
       if (!originalSale) {
@@ -82,8 +89,11 @@ export class SalesReturnService {
       const salesReturn = manager.create(SalesReturn, {
         originalSale,
         originalSaleId: originalSale.id,
+        creditNoteNumber: await this.generateCreditNoteNumber(manager),
         returnDate: createSalesReturnDto.returnDate || new Date(),
         totalRefund: 0,
+        note: createSalesReturnDto.note?.trim() ?? null,
+        createdByUserId: actorUserId ?? null,
       });
 
       const persistedReturn = await manager.save(SalesReturn, salesReturn);
@@ -142,9 +152,60 @@ export class SalesReturnService {
       persistedReturn.totalRefund = Number(runningTotal.toFixed(2));
       await manager.save(SalesReturn, persistedReturn);
 
+      const refundPayments = createSalesReturnDto.refundPayments ?? [];
+      const totalPaidOut = Number(
+        refundPayments
+          .reduce((sum, payment) => sum + payment.amount, 0)
+          .toFixed(2),
+      );
+
+      if (totalPaidOut > persistedReturn.totalRefund) {
+        throw new BadRequestException(
+          'Refund payment total cannot exceed return total refund.',
+        );
+      }
+
+      for (const payment of refundPayments) {
+        const refundPayment = manager.create(SalesReturnPayment, {
+          salesReturnId: persistedReturn.id,
+          method: payment.method,
+          amount: Number(payment.amount.toFixed(2)),
+          reference: payment.reference?.trim() ?? null,
+          meta: payment.meta ?? null,
+          createdBy: actorUserId ?? null,
+        });
+        await manager.save(SalesReturnPayment, refundPayment);
+      }
+
+      originalSale.refundedTotal = Number(
+        (originalSale.refundedTotal + persistedReturn.totalRefund).toFixed(2),
+      );
+
+      const previousDue = originalSale.dueTotal;
+      const nextDue = Math.max(originalSale.dueTotal - persistedReturn.totalRefund, 0);
+      originalSale.dueTotal = Number(nextDue.toFixed(2));
+      originalSale.dueAmount = originalSale.dueTotal;
+
+      if (originalSale.refundedTotal >= originalSale.grandTotal) {
+        originalSale.status = SaleStatus.REFUNDED;
+      } else if (originalSale.dueTotal <= 0) {
+        originalSale.status = SaleStatus.PAID;
+      } else if (originalSale.paidTotal > 0) {
+        originalSale.status = SaleStatus.PARTIAL;
+      } else {
+        originalSale.status = SaleStatus.UNPAID;
+      }
+
+      await manager.save(Sale, originalSale);
+
+      if (originalSale.customerId && previousDue > originalSale.dueTotal) {
+        const delta = Number((previousDue - originalSale.dueTotal).toFixed(2));
+        await this.adjustCustomerDue(manager, originalSale.customerId, -delta);
+      }
+
       const createdReturn = await manager.findOne(SalesReturn, {
         where: { id: persistedReturn.id },
-        relations: { returnedItems: true },
+        relations: { returnedItems: true, refundPayments: true },
       });
 
       if (!createdReturn) {
@@ -163,7 +224,7 @@ export class SalesReturnService {
    */
   async findAll(): Promise<SalesReturn[]> {
     return this.salesReturnRepository.find({
-      relations: { returnedItems: true },
+      relations: { returnedItems: true, refundPayments: true },
       order: { createdAt: 'DESC' },
     });
   }
@@ -177,11 +238,45 @@ export class SalesReturnService {
   async findOne(id: string): Promise<SalesReturn> {
     const salesReturn = await this.salesReturnRepository.findOne({
       where: { id },
-      relations: { returnedItems: true },
+      relations: { returnedItems: true, refundPayments: true },
     });
     if (!salesReturn) {
       throw new NotFoundException(`Sales return "${id}" not found.`);
     }
     return salesReturn;
+  }
+
+  private async adjustCustomerDue(
+    manager: EntityManager,
+    customerId: number,
+    amountDelta: number,
+  ): Promise<void> {
+    if (amountDelta === 0) {
+      return;
+    }
+
+    await manager
+      .createQueryBuilder()
+      .update(Customer)
+      .set({ totalDue: () => `GREATEST(total_due + ${amountDelta}, 0)` })
+      .where('id = :id', { id: customerId })
+      .execute();
+  }
+
+  private async generateCreditNoteNumber(manager: EntityManager): Promise<string> {
+    const latest = await manager
+      .createQueryBuilder(SalesReturn, 'salesReturn')
+      .setLock('pessimistic_write')
+      .orderBy('salesReturn.createdAt', 'DESC')
+      .addOrderBy('salesReturn.id', 'DESC')
+      .getOne();
+
+    if (!latest) {
+      return 'CN-0001';
+    }
+
+    const match = /^CN-(\d+)$/.exec(latest.creditNoteNumber);
+    const lastNumber = match ? Number(match[1]) : 0;
+    return `CN-${String(lastNumber + 1).padStart(4, '0')}`;
   }
 }

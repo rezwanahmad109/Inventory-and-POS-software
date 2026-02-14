@@ -4,9 +4,11 @@ import {
   IsInt,
   IsNotEmpty,
   IsNumber,
+  IsObject,
   IsOptional,
   IsString,
   IsUUID,
+  IsArray,
   MaxLength,
   Min,
   IsEnum,
@@ -32,6 +34,26 @@ export class CreateProductDto {
   @IsString()
   @MaxLength(80)
   barcode?: string;
+
+  @ApiPropertyOptional({ example: 'Zebra' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(120)
+  brand?: string;
+
+  @ApiPropertyOptional({ type: [String], example: ['1234567890124', '1234567890125'] })
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  additionalBarcodes?: string[];
+
+  @ApiPropertyOptional({
+    type: 'object',
+    example: { color: 'Black', size: 'M' },
+  })
+  @IsOptional()
+  @IsObject()
+  variationAttributes?: Record<string, string>;
 
   @ApiProperty({ example: '0f8fad5b-d9cb-469f-a165-70867728950e' })
   @IsUUID()

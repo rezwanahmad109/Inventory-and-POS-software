@@ -95,6 +95,15 @@ export class Product {
   @Column({ length: 80, nullable: true })
   barcode!: string | null;
 
+  @Column({ length: 120, nullable: true })
+  brand!: string | null;
+
+  @Column({ name: 'additional_barcodes', type: 'jsonb', nullable: true })
+  additionalBarcodes!: string[] | null;
+
+  @Column({ name: 'variation_attributes', type: 'jsonb', nullable: true })
+  variationAttributes!: Record<string, string> | null;
+
   @ManyToOne(() => Category, (category) => category.products, {
     nullable: false,
     onDelete: 'RESTRICT',

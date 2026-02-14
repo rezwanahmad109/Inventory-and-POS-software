@@ -81,6 +81,7 @@ const PERMISSIONS: PermissionDefinition[] = [
   { module: 'sales', action: 'delete', description: 'Delete sale' },
   { module: 'sales_returns', action: 'create', description: 'Create sales return' },
   { module: 'sales_returns', action: 'read', description: 'Read sales return' },
+  { module: 'pos', action: 'access', description: 'Access POS operations' },
   { module: 'expenses', action: 'create', description: 'Create expense' },
   { module: 'expenses', action: 'read', description: 'Read expense' },
   { module: 'expenses', action: 'update', description: 'Update expense' },
@@ -132,6 +133,10 @@ const productPermissionSlugs = PERMISSIONS.filter(
 
 const salesPermissionSlugs = PERMISSIONS.filter(
   (permission) => permission.module === 'sales',
+).map((permission) => buildSlug(permission.module, permission.action));
+
+const posPermissionSlugs = PERMISSIONS.filter(
+  (permission) => permission.module === 'pos',
 ).map((permission) => buildSlug(permission.module, permission.action));
 
 const inventoryPermissionSlugs = PERMISSIONS.filter(
@@ -197,6 +202,7 @@ const ROLES: RoleDefinition[] = [
       ...productPermissionSlugs,
       ...inventoryPermissionSlugs,
       ...salesPermissionSlugs,
+      ...posPermissionSlugs,
       ...customerPermissionSlugs,
       ...branchPermissionSlugs,
       ...branchProductPermissionSlugs,
@@ -267,6 +273,7 @@ const ROLES: RoleDefinition[] = [
     permissionSlugs: [
       'sales.create',
       'sales.view',
+      ...posPermissionSlugs,
       'sales_returns.create',
       'sales_returns.read',
       'purchase_returns.create',

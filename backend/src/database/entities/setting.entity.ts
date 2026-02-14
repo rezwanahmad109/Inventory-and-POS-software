@@ -49,6 +49,28 @@ export interface DiscountRuleSetting {
   isActive: boolean;
 }
 
+export interface CurrencySetting {
+  code: string;
+  symbol: string;
+  position: 'left' | 'right';
+  isDefault: boolean;
+}
+
+export interface PaymentModeSetting {
+  code: string;
+  name: string;
+  isActive: boolean;
+}
+
+export interface EmailNotificationSetting {
+  enabled: boolean;
+  senderName: string | null;
+  senderEmail: string | null;
+  smtpHost: string | null;
+  smtpPort: number | null;
+  useTls: boolean;
+}
+
 @Entity({ name: 'settings' })
 export class Setting {
   @PrimaryGeneratedColumn()
@@ -90,6 +112,15 @@ export class Setting {
 
   @Column({ name: 'stock_policy', type: 'jsonb', nullable: true })
   stockPolicy!: StockPolicySetting | null;
+
+  @Column({ name: 'currencies', type: 'jsonb', nullable: true })
+  currencies!: CurrencySetting[] | null;
+
+  @Column({ name: 'payment_modes', type: 'jsonb', nullable: true })
+  paymentModes!: PaymentModeSetting[] | null;
+
+  @Column({ name: 'email_notification_settings', type: 'jsonb', nullable: true })
+  emailNotificationSettings!: EmailNotificationSetting | null;
 
   @CreateDateColumn({ name: 'created_at' })
   createdAt!: Date;
