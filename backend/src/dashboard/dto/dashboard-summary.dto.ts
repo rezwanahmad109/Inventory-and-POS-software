@@ -27,7 +27,7 @@ export class DashboardSummaryDto {
   /** Total count of all products in the system */
   totalProducts!: number;
 
-  /** Count of products where stockQty < low stock threshold (10) */
+  /** Count of branch-product rows where stock is at or below threshold */
   lowStockItems!: number;
 
   // ─── CUSTOMERS ───

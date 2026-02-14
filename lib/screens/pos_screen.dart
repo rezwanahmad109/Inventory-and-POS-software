@@ -1,8 +1,11 @@
 import 'dart:collection';
 
 import 'package:flutter/material.dart';
+import 'package:flutter_bloc/flutter_bloc.dart';
 
 import '../app_routes.dart';
+import '../features/auth/bloc/auth_bloc.dart';
+import '../features/auth/bloc/auth_state.dart';
 
 const Color kPosPrimaryBlue = Color(0xFF1F4FFF);
 const Color kPosAccentGold = Color(0xFFD4AF37);
@@ -49,6 +52,11 @@ class _PosScreenState extends State<PosScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final AuthState authState = context.watch<AuthBloc>().state;
+    final bool canAccessSettings = authState.hasAnyRole(
+      const <String>['admin', 'super_admin'],
+    );
+
     return Scaffold(
       backgroundColor: Colors.white,
       appBar: POSAppBar(
@@ -57,6 +65,7 @@ class _PosScreenState extends State<PosScreen> {
         onSalesReturnTap: () => _openRoute(context, AppRoutes.salesReturn),
         onPurchaseReturnTap: () =>
             _openRoute(context, AppRoutes.purchaseReturn),
+        canAccessSettings: canAccessSettings,
         onSettingsTap: () => _openRoute(context, AppRoutes.settings),
       ),
       body: SafeArea(
@@ -159,6 +168,7 @@ class POSAppBar extends StatelessWidget implements PreferredSizeWidget {
     required this.onSalesHistoryTap,
     required this.onSalesReturnTap,
     required this.onPurchaseReturnTap,
+    required this.canAccessSettings,
     required this.onSettingsTap,
   });
 
@@ -166,6 +176,7 @@ class POSAppBar extends StatelessWidget implements PreferredSizeWidget {
   final VoidCallback onSalesHistoryTap;
   final VoidCallback onSalesReturnTap;
   final VoidCallback onPurchaseReturnTap;
+  final bool canAccessSettings;
   final VoidCallback onSettingsTap;
 
   @override
@@ -199,34 +210,37 @@ class POSAppBar extends StatelessWidget implements PreferredSizeWidget {
                       onPurchaseReturnTap();
                       break;
                     case 'settings':
-                      onSettingsTap();
+                      if (canAccessSettings) {
+                        onSettingsTap();
+                      }
                       break;
                     default:
                       break;
                   }
                 },
                 itemBuilder: (BuildContext context) =>
-                    const <PopupMenuEntry<String>>[
-                      PopupMenuItem<String>(
+                    <PopupMenuEntry<String>>[
+                      const PopupMenuItem<String>(
                         value: 'inventory',
                         child: Text('Inventory'),
                       ),
-                      PopupMenuItem<String>(
+                      const PopupMenuItem<String>(
                         value: 'sales',
                         child: Text('Sales History'),
                       ),
-                      PopupMenuItem<String>(
+                      const PopupMenuItem<String>(
                         value: 'sales_return',
                         child: Text('Sales Return'),
                       ),
-                      PopupMenuItem<String>(
+                      const PopupMenuItem<String>(
                         value: 'purchase_return',
                         child: Text('Purchase Return'),
                       ),
-                      PopupMenuItem<String>(
-                        value: 'settings',
-                        child: Text('Settings'),
-                      ),
+                      if (canAccessSettings)
+                        const PopupMenuItem<String>(
+                          value: 'settings',
+                          child: Text('Settings'),
+                        ),
                     ],
               ),
             ]
@@ -251,11 +265,12 @@ class POSAppBar extends StatelessWidget implements PreferredSizeWidget {
                 icon: Icons.keyboard_return_outlined,
                 onPressed: onPurchaseReturnTap,
               ),
-              _AppBarActionButton(
-                label: 'Settings',
-                icon: Icons.settings_outlined,
-                onPressed: onSettingsTap,
-              ),
+              if (canAccessSettings)
+                _AppBarActionButton(
+                  label: 'Settings',
+                  icon: Icons.settings_outlined,
+                  onPressed: onSettingsTap,
+                ),
               const SizedBox(width: 8),
             ],
     );
@@ -324,7 +339,7 @@ class ProductGridView extends StatelessWidget {
           itemBuilder: (BuildContext context, int index) {
             final PosProduct product = products[index];
             final int inCart = quantityByProduct[product.id] ?? 0;
-            final bool lowStock = product.stockQty <= 8;
+            final bool lowStock = product.isLowStock;
             final bool canAdd = canAddProduct(product);
 
             return RepaintBoundary(
@@ -760,6 +775,7 @@ class PosProduct {
     required this.name,
     required this.price,
     required this.stockQty,
+    required this.lowStockThreshold,
     required this.imageUrl,
   });
 
@@ -767,7 +783,10 @@ class PosProduct {
   final String name;
   final double price;
   final int stockQty;
+  final int lowStockThreshold;
   final String imageUrl;
+
+  bool get isLowStock => lowStockThreshold > 0 && stockQty <= lowStockThreshold;
 }
 
 class CartLine {
@@ -818,6 +837,7 @@ const List<PosProduct> kMockProducts = <PosProduct>[
     name: 'Wireless Barcode Scanner',
     price: 49.99,
     stockQty: 22,
+    lowStockThreshold: 5,
     imageUrl: 'https://picsum.photos/seed/pos001/420/300',
   ),
   PosProduct(
@@ -825,6 +845,7 @@ const List<PosProduct> kMockProducts = <PosProduct>[
     name: 'Thermal Receipt Printer',
     price: 179.00,
     stockQty: 6,
+    lowStockThreshold: 8,
     imageUrl: 'https://picsum.photos/seed/pos002/420/300',
   ),
   PosProduct(
@@ -832,6 +853,7 @@ const List<PosProduct> kMockProducts = <PosProduct>[
     name: 'Cash Drawer (Metal)',
     price: 129.50,
     stockQty: 9,
+    lowStockThreshold: 9,
     imageUrl: 'https://picsum.photos/seed/pos003/420/300',
   ),
   PosProduct(
@@ -839,6 +861,7 @@ const List<PosProduct> kMockProducts = <PosProduct>[
     name: 'POS Terminal Stand',
     price: 69.00,
     stockQty: 17,
+    lowStockThreshold: 6,
     imageUrl: 'https://picsum.photos/seed/pos004/420/300',
   ),
   PosProduct(
@@ -846,6 +869,7 @@ const List<PosProduct> kMockProducts = <PosProduct>[
     name: 'NFC Card Reader',
     price: 99.99,
     stockQty: 14,
+    lowStockThreshold: 7,
     imageUrl: 'https://picsum.photos/seed/pos005/420/300',
   ),
   PosProduct(
@@ -853,6 +877,7 @@ const List<PosProduct> kMockProducts = <PosProduct>[
     name: 'Receipt Paper Roll (Pack)',
     price: 14.75,
     stockQty: 82,
+    lowStockThreshold: 20,
     imageUrl: 'https://picsum.photos/seed/pos006/420/300',
   ),
   PosProduct(
@@ -860,6 +885,7 @@ const List<PosProduct> kMockProducts = <PosProduct>[
     name: 'USB Numeric Keypad',
     price: 19.20,
     stockQty: 38,
+    lowStockThreshold: 8,
     imageUrl: 'https://picsum.photos/seed/pos007/420/300',
   ),
   PosProduct(
@@ -867,6 +893,7 @@ const List<PosProduct> kMockProducts = <PosProduct>[
     name: 'Customer Display Screen',
     price: 210.00,
     stockQty: 5,
+    lowStockThreshold: 6,
     imageUrl: 'https://picsum.photos/seed/pos008/420/300',
   ),
   PosProduct(
@@ -874,6 +901,7 @@ const List<PosProduct> kMockProducts = <PosProduct>[
     name: 'Label Printer',
     price: 155.40,
     stockQty: 11,
+    lowStockThreshold: 10,
     imageUrl: 'https://picsum.photos/seed/pos009/420/300',
   ),
   PosProduct(
@@ -881,6 +909,7 @@ const List<PosProduct> kMockProducts = <PosProduct>[
     name: 'Handheld Inventory Scanner',
     price: 88.00,
     stockQty: 27,
+    lowStockThreshold: 9,
     imageUrl: 'https://picsum.photos/seed/pos010/420/300',
   ),
   PosProduct(
@@ -888,6 +917,7 @@ const List<PosProduct> kMockProducts = <PosProduct>[
     name: 'Barcode Label Stickers',
     price: 12.80,
     stockQty: 120,
+    lowStockThreshold: 15,
     imageUrl: 'https://picsum.photos/seed/pos011/420/300',
   ),
   PosProduct(
@@ -895,6 +925,7 @@ const List<PosProduct> kMockProducts = <PosProduct>[
     name: 'POS Touch Monitor 15"',
     price: 299.00,
     stockQty: 8,
+    lowStockThreshold: 8,
     imageUrl: 'https://picsum.photos/seed/pos012/420/300',
   ),
 ];

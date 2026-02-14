@@ -121,10 +121,20 @@ class _InventoryListScreenState extends State<InventoryListScreen> {
             onPressed: () => _navigateToSection(AppRoutes.salesHistory),
             icon: const Icon(Icons.history),
           ),
-          IconButton(
-            tooltip: 'Settings',
-            onPressed: () => _navigateToSection(AppRoutes.settings),
-            icon: const Icon(Icons.settings_outlined),
+          BlocBuilder<AuthBloc, AuthState>(
+            builder: (BuildContext context, AuthState authState) {
+              if (
+                  !authState.hasAnyRole(
+                    const <String>['admin', 'super_admin'],
+                  )) {
+                return const SizedBox.shrink();
+              }
+              return IconButton(
+                tooltip: 'Settings',
+                onPressed: () => _navigateToSection(AppRoutes.settings),
+                icon: const Icon(Icons.settings_outlined),
+              );
+            },
           ),
         ],
       ),
@@ -138,6 +148,9 @@ class _InventoryListScreenState extends State<InventoryListScreen> {
             ),
             canCreatePurchaseReturn: authState.hasPermission(
               'purchase_returns.create',
+            ),
+            canAccessSettings: authState.hasAnyRole(
+              const <String>['admin', 'super_admin'],
             ),
           );
         },
@@ -174,7 +187,7 @@ class _InventoryListScreenState extends State<InventoryListScreen> {
                           snapshot.data ?? <Product>[];
                       final List<Product> visibleProducts = _showLowStockOnly
                           ? products
-                                .where((Product p) => p.stockQty <= 10)
+                                .where((Product p) => p.isLowStock)
                                 .toList()
                           : products;
 
@@ -206,43 +219,51 @@ class _InventoryListScreenState extends State<InventoryListScreen> {
           );
         },
       ),
-      bottomNavigationBar: NavigationBar(
-        selectedIndex: 0,
-        onDestinationSelected: (int index) {
-          switch (index) {
-            case 0:
-              break;
-            case 1:
-              _navigateToSection(AppRoutes.cartCheckout);
-              break;
-            case 2:
-              _navigateToSection(AppRoutes.salesHistory);
-              break;
-            case 3:
-              _navigateToSection(AppRoutes.settings);
-              break;
-            default:
-              break;
-          }
+      bottomNavigationBar: BlocBuilder<AuthBloc, AuthState>(
+        builder: (BuildContext context, AuthState authState) {
+          final bool canAccessSettings = authState.hasAnyRole(
+            const <String>['admin', 'super_admin'],
+          );
+
+          final List<String?> routes = <String?>[
+            null,
+            AppRoutes.cartCheckout,
+            AppRoutes.salesHistory,
+            if (canAccessSettings) AppRoutes.settings,
+          ];
+
+          final List<NavigationDestination> destinations =
+              <NavigationDestination>[
+                const NavigationDestination(
+                  icon: Icon(Icons.inventory_2_outlined),
+                  label: 'Inventory',
+                ),
+                const NavigationDestination(
+                  icon: Icon(Icons.shopping_cart_checkout),
+                  label: 'Checkout',
+                ),
+                const NavigationDestination(
+                  icon: Icon(Icons.receipt_long_outlined),
+                  label: 'Sales',
+                ),
+                if (canAccessSettings)
+                  const NavigationDestination(
+                    icon: Icon(Icons.settings_outlined),
+                    label: 'Settings',
+                  ),
+              ];
+
+          return NavigationBar(
+            selectedIndex: 0,
+            destinations: destinations,
+            onDestinationSelected: (int index) {
+              final String? route = routes[index];
+              if (route != null) {
+                _navigateToSection(route);
+              }
+            },
+          );
         },
-        destinations: const <NavigationDestination>[
-          NavigationDestination(
-            icon: Icon(Icons.inventory_2_outlined),
-            label: 'Inventory',
-          ),
-          NavigationDestination(
-            icon: Icon(Icons.shopping_cart_checkout),
-            label: 'Checkout',
-          ),
-          NavigationDestination(
-            icon: Icon(Icons.receipt_long_outlined),
-            label: 'Sales',
-          ),
-          NavigationDestination(
-            icon: Icon(Icons.settings_outlined),
-            label: 'Settings',
-          ),
-        ],
       ),
     );
   }
@@ -254,12 +275,14 @@ class _AppDrawer extends StatelessWidget {
     required this.canManageRoles,
     required this.canCreateSalesReturn,
     required this.canCreatePurchaseReturn,
+    required this.canAccessSettings,
   });
 
   final ValueChanged<String> onNavigate;
   final bool canManageRoles;
   final bool canCreateSalesReturn;
   final bool canCreatePurchaseReturn;
+  final bool canAccessSettings;
 
   @override
   Widget build(BuildContext context) {
@@ -324,14 +347,15 @@ class _AppDrawer extends StatelessWidget {
                 onNavigate(AppRoutes.purchaseReturn);
               },
             ),
-          ListTile(
-            leading: const Icon(Icons.settings_outlined),
-            title: const Text('Settings'),
-            onTap: () {
-              Navigator.pop(context);
-              onNavigate(AppRoutes.settings);
-            },
-          ),
+          if (canAccessSettings)
+            ListTile(
+              leading: const Icon(Icons.settings_outlined),
+              title: const Text('Settings'),
+              onTap: () {
+                Navigator.pop(context);
+                onNavigate(AppRoutes.settings);
+              },
+            ),
           if (canManageRoles)
             ListTile(
               leading: const Icon(Icons.admin_panel_settings_outlined),
@@ -460,7 +484,7 @@ class _ProductListTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final bool lowStock = product.stockQty <= 10;
+    final bool lowStock = product.isLowStock;
     return Card(
       child: ListTile(
         key: ValueKey<String>(product.id),
@@ -507,7 +531,7 @@ class _ProductCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final bool lowStock = product.stockQty <= 10;
+    final bool lowStock = product.isLowStock;
     return RepaintBoundary(
       child: Card(
         key: ValueKey<String>('card-${product.id}'),
@@ -633,6 +657,7 @@ class Product {
     required this.category,
     required this.unitPrice,
     required this.stockQty,
+    required this.lowStockThreshold,
   });
 
   final String id;
@@ -641,8 +666,17 @@ class Product {
   final String category;
   final double unitPrice;
   final int stockQty;
+  final int lowStockThreshold;
+
+  bool get isLowStock =>
+      lowStockThreshold > 0 && stockQty <= lowStockThreshold;
 
   factory Product.fromJson(Map<String, dynamic> json) {
+    final num thresholdRaw =
+        (json['lowStockThreshold'] as num?) ??
+        (json['low_stock_threshold'] as num?) ??
+        0;
+
     return Product(
       id: '${json['id'] ?? ''}',
       sku: '${json['sku'] ?? ''}',
@@ -650,6 +684,7 @@ class Product {
       category: '${json['category'] ?? 'General'}',
       unitPrice: (json['unitPrice'] as num?)?.toDouble() ?? 0,
       stockQty: (json['stockQty'] as num?)?.toInt() ?? 0,
+      lowStockThreshold: thresholdRaw.toInt(),
     );
   }
 }
@@ -728,6 +763,7 @@ const List<Product> _seedProducts = <Product>[
     category: 'Hardware',
     unitPrice: 49.99,
     stockQty: 18,
+    lowStockThreshold: 6,
   ),
   Product(
     id: '2',
@@ -736,6 +772,7 @@ const List<Product> _seedProducts = <Product>[
     category: 'Hardware',
     unitPrice: 179.0,
     stockQty: 7,
+    lowStockThreshold: 8,
   ),
   Product(
     id: '3',
@@ -744,6 +781,7 @@ const List<Product> _seedProducts = <Product>[
     category: 'Consumables',
     unitPrice: 4.99,
     stockQty: 92,
+    lowStockThreshold: 12,
   ),
   Product(
     id: '4',
@@ -752,6 +790,7 @@ const List<Product> _seedProducts = <Product>[
     category: 'Hardware',
     unitPrice: 89.5,
     stockQty: 11,
+    lowStockThreshold: 10,
   ),
   Product(
     id: '5',
@@ -760,6 +799,7 @@ const List<Product> _seedProducts = <Product>[
     category: 'Hardware',
     unitPrice: 129.0,
     stockQty: 5,
+    lowStockThreshold: 5,
   ),
   Product(
     id: '6',
@@ -768,5 +808,6 @@ const List<Product> _seedProducts = <Product>[
     category: 'Accessories',
     unitPrice: 24.0,
     stockQty: 33,
+    lowStockThreshold: 7,
   ),
 ];

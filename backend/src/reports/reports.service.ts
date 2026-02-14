@@ -4,6 +4,7 @@ import { Repository } from 'typeorm';
 import { Sale } from '../database/entities/sale.entity';
 import { Purchase } from '../database/entities/purchase.entity';
 import { Expense } from '../database/entities/expense.entity';
+import { BranchProductEntity } from '../database/entities/branch-product.entity';
 import { Product } from '../database/entities/product.entity';
 import { SalesSummaryDto } from './dto/sales-summary.dto';
 import { PurchaseSummaryDto } from './dto/purchase-summary.dto';
@@ -22,6 +23,8 @@ export class ReportsService {
     private readonly expenseRepository: Repository<Expense>,
     @InjectRepository(Product)
     private readonly productRepository: Repository<Product>,
+    @InjectRepository(BranchProductEntity)
+    private readonly branchProductsRepository: Repository<BranchProductEntity>,
   ) {}
 
   /**
@@ -164,12 +167,18 @@ export class ReportsService {
 
     const data = await query.getRawOne();
 
-    // Low stock items: stockQty < 10 (threshold)
-    const lowStockQuery = this.productRepository
-      .createQueryBuilder('product')
+    const lowStockQuery = this.branchProductsRepository
+      .createQueryBuilder('branchProduct')
+      .leftJoin('branchProduct.product', 'product')
+      .leftJoin('branchProduct.branch', 'branch')
       .select('product.name', 'productName')
-      .addSelect('product.stockQty', 'currentStock')
-      .where('product.stockQty < 10');
+      .addSelect('branch.name', 'branchName')
+      .addSelect('branchProduct.stock_quantity', 'currentStock')
+      .addSelect('branchProduct.low_stock_threshold', 'lowStockThreshold')
+      .where('branchProduct.low_stock_threshold > 0')
+      .andWhere('branchProduct.stock_quantity <= branchProduct.low_stock_threshold')
+      .andWhere('branch.is_active = true')
+      .orderBy('branchProduct.stock_quantity', 'ASC');
 
     const lowStockItems = await lowStockQuery.getRawMany();
 
@@ -178,8 +187,10 @@ export class ReportsService {
       totalValue: parseFloat(data.totalValue || 0),
       lowStockItems: lowStockItems.map((item: any) => ({
         productName: item.productName,
+        branchName: item.branchName ?? null,
         currentStock: parseInt(item.currentStock),
-        minStock: 10, // Threshold
+        minStock: parseInt(item.lowStockThreshold),
+        lowStockThreshold: parseInt(item.lowStockThreshold),
       })),
     };
   }

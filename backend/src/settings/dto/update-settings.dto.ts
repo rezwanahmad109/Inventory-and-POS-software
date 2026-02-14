@@ -1,5 +1,7 @@
 import {
+  IsArray,
   IsNumber,
+  IsObject,
   IsOptional,
   IsString,
   IsUrl,
@@ -38,4 +40,24 @@ export class UpdateSettingsDto {
   @IsOptional()
   @IsString()
   footerNote?: string;
+
+  @IsOptional()
+  @IsObject()
+  businessProfile?: Record<string, unknown>;
+
+  @IsOptional()
+  @IsObject()
+  invoiceTemplate?: Record<string, unknown>;
+
+  @IsOptional()
+  @IsArray()
+  taxSettings?: unknown[];
+
+  @IsOptional()
+  @IsArray()
+  discountRules?: unknown[];
+
+  @IsOptional()
+  @IsObject()
+  stockPolicy?: Record<string, unknown>;
 }

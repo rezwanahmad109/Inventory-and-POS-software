@@ -89,6 +89,7 @@ const PERMISSIONS: PermissionDefinition[] = [
   { module: 'reports', action: 'export', description: 'Export reports' },
   { module: 'settings', action: 'read', description: 'Read settings' },
   { module: 'settings', action: 'update', description: 'Update settings' },
+  { module: 'audit_logs', action: 'read', description: 'Read audit logs' },
   { module: 'finance_accounts', action: 'read', description: 'Read chart of accounts' },
   { module: 'finance_accounts', action: 'seed', description: 'Seed chart of accounts' },
   { module: 'finance_invoices', action: 'create', description: 'Create finance invoice' },
@@ -167,6 +168,10 @@ const dashboardPermissionSlugs = PERMISSIONS.filter(
   (permission) => permission.module === 'dashboard',
 ).map((permission) => buildSlug(permission.module, permission.action));
 
+const auditPermissionSlugs = PERMISSIONS.filter(
+  (permission) => permission.module === 'audit_logs',
+).map((permission) => buildSlug(permission.module, permission.action));
+
 const ROLES: RoleDefinition[] = [
   {
     name: 'super_admin',
@@ -204,6 +209,55 @@ const ROLES: RoleDefinition[] = [
       'purchase_returns.create',
       'purchase_returns.read',
       'settings.read',
+      ...auditPermissionSlugs,
+    ],
+  },
+  {
+    name: 'branch_manager',
+    description: 'Branch-level operational control for stock and transfers.',
+    isSystem: true,
+    permissionSlugs: [
+      'dashboard.view',
+      'inventory.view',
+      'inventory.update',
+      'inventory.adjust',
+      'products.read',
+      'products.update',
+      'branches.read',
+      'branches.update',
+      'branch_products.read',
+      'branch_products.update',
+      'stock_transfers.create',
+      'stock_transfers.read',
+      'sales.view',
+      'reports.view',
+      'reports.export',
+      'settings.read',
+      ...auditPermissionSlugs,
+    ],
+  },
+  {
+    name: 'stock_admin',
+    description: 'Inventory-focused role for stock operations across branches.',
+    isSystem: true,
+    permissionSlugs: [
+      'dashboard.view',
+      'inventory.view',
+      'inventory.create',
+      'inventory.update',
+      'inventory.delete',
+      'inventory.adjust',
+      'products.read',
+      'products.update',
+      'branches.read',
+      'branch_products.read',
+      'branch_products.update',
+      'stock_transfers.create',
+      'stock_transfers.read',
+      'reports.view',
+      'reports.export',
+      'settings.read',
+      ...auditPermissionSlugs,
     ],
   },
   {

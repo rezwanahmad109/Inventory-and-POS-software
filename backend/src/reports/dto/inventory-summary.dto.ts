@@ -1,7 +1,9 @@
 export class LowStockItemDto {
   productName!: string;
+  branchName!: string | null;
   currentStock!: number;
   minStock!: number;
+  lowStockThreshold!: number;
 }
 
 export class InventorySummaryDto {

@@ -10,6 +10,7 @@ import 'features/auth/bloc/auth_state.dart';
 import 'features/roles/bloc/role_bloc.dart';
 import 'features/roles/repository/role_repository.dart';
 import 'features/roles/screens/role_management_screen.dart';
+import 'screens/admin_settings_screen.dart';
 import 'screens/checkout_screen.dart';
 import 'screens/inventory_list_screen.dart';
 import 'screens/purchase_return_screen.dart';
@@ -137,10 +138,13 @@ class InventoryPosApp extends StatelessWidget {
                   if (authState.status != AuthStatus.authenticated) {
                     return LoginPage(apiClient: _apiClient);
                   }
-                  if (!authState.hasPermission('settings.read')) {
+                  if (
+                      !authState.hasAnyRole(
+                        const <String>['admin', 'super_admin'],
+                      )) {
                     return const _AccessDeniedPage(title: 'Settings');
                   }
-                  return const SettingsPage();
+                  return AdminSettingsScreen(apiClient: _apiClient);
                 },
               ),
           AppRoutes.roles: (BuildContext context) =>
@@ -451,6 +455,7 @@ class ProductDetailsPage extends StatelessWidget {
           category: 'N/A',
           unitPrice: 0,
           stockQty: 0,
+          lowStockThreshold: 0,
         );
 
     return Scaffold(

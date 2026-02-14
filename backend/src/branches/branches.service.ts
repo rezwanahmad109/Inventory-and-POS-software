@@ -15,6 +15,7 @@ import {
 
 import { BranchProductDto } from './dto/branch-product.dto';
 import { CreateBranchDto } from './dto/create-branch.dto';
+import { QuickStockService } from './quick-stock.service';
 import { StockTransferDto } from './dto/stock-transfer.dto';
 import { UpdateBranchDto } from './dto/update-branch.dto';
 import { BranchEntity } from '../database/entities/branch.entity';
@@ -53,6 +54,7 @@ export class BranchesService {
     private readonly stockTransfersRepository: Repository<StockTransferEntity>,
     @InjectRepository(Product)
     private readonly productsRepository: Repository<Product>,
+    private readonly quickStockService: QuickStockService,
     private readonly dataSource: DataSource,
   ) {}
 
@@ -229,6 +231,7 @@ export class BranchesService {
       }
 
       await manager.save(BranchProductEntity, branchProduct);
+      this.quickStockService.invalidateLowStockCache();
       this.logLowStockCrossing(branchProduct, previousStockQuantity, 'branch_adjustment');
 
       const reloaded = await manager.findOne(BranchProductEntity, {
@@ -251,18 +254,8 @@ export class BranchesService {
   }
 
   async getLowStockAcrossBranches(): Promise<BranchProductView[]> {
-    const lowStockRows = await this.branchProductsRepository
-      .createQueryBuilder('branchProduct')
-      .leftJoinAndSelect('branchProduct.branch', 'branch')
-      .leftJoinAndSelect('branchProduct.product', 'product')
-      .leftJoinAndSelect('product.category', 'category')
-      .leftJoinAndSelect('product.unit', 'unit')
-      .where('branchProduct.low_stock_threshold > 0')
-      .andWhere('branchProduct.stock_quantity < branchProduct.low_stock_threshold')
-      .andWhere('branch.is_active = true')
-      .orderBy('branchProduct.stock_quantity', 'ASC')
-      .addOrderBy('branch.updated_at', 'DESC')
-      .getMany();
+    const lowStockRows =
+      await this.quickStockService.getLowStockAcrossBranches();
 
     return lowStockRows.map((row) => this.toBranchProductView(row));
   }
@@ -455,6 +448,7 @@ export class BranchesService {
 
     branchProduct.stockQuantity = nextStockQuantity;
     await manager.save(BranchProductEntity, branchProduct);
+    this.quickStockService.invalidateLowStockCache();
 
     if (syncGlobalProductStock && deltaQuantity !== 0) {
       product.stockQty += deltaQuantity;
@@ -503,7 +497,10 @@ export class BranchesService {
       stockQuantity: branchProduct.stockQuantity,
       lowStockThreshold: threshold,
       stockValue,
-      isLowStock: threshold > 0 && branchProduct.stockQuantity < threshold,
+      isLowStock: this.quickStockService.isLowStock(
+        branchProduct.stockQuantity,
+        threshold,
+      ),
       unitPrice,
       product: branchProduct.product,
     };
@@ -519,9 +516,11 @@ export class BranchesService {
       return;
     }
 
-    const crossedBelowThreshold =
-      previousStockQuantity >= threshold &&
-      branchProduct.stockQuantity < threshold;
+    const crossedBelowThreshold = this.quickStockService.crossedIntoLowStock(
+      previousStockQuantity,
+      branchProduct.stockQuantity,
+      threshold,
+    );
 
     if (!crossedBelowThreshold) {
       return;

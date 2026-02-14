@@ -43,6 +43,22 @@ class AuthState {
         .contains(normalizedRequiredPermission);
   }
 
+  bool hasRole(String role) {
+    final String normalizedRole = role.toLowerCase().trim();
+    return roles.map((String value) => value.toLowerCase().trim()).contains(
+      normalizedRole,
+    );
+  }
+
+  bool hasAnyRole(List<String> allowedRoles) {
+    for (final String role in allowedRoles) {
+      if (hasRole(role)) {
+        return true;
+      }
+    }
+    return false;
+  }
+
   static String _normalizePermission(String permission) {
     return permission.toLowerCase().trim().replaceAll(':', '.');
   }

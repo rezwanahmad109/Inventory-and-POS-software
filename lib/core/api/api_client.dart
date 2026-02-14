@@ -62,6 +62,23 @@ class ApiClient {
     }
   }
 
+  Future<dynamic> put(String path, {Map<String, dynamic>? body}) async {
+    try {
+      final response = await _client
+          .put(
+            _uri(path),
+            headers: _headers,
+            body: body != null ? jsonEncode(body) : null,
+          )
+          .timeout(_requestTimeout);
+      return _handleResponse(response);
+    } on TimeoutException {
+      throw const ApiException(408, 'Request timed out.');
+    } on http.ClientException catch (error) {
+      throw ApiException(503, 'Network error: ${error.message}');
+    }
+  }
+
   dynamic _handleResponse(http.Response response) {
     if (response.statusCode >= 200 && response.statusCode < 300) {
       if (response.body.isEmpty) return null;

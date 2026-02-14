@@ -2,14 +2,12 @@ import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 
-import { Sale } from '../database/entities/sale.entity';
-import { Purchase } from '../database/entities/purchase.entity';
+import { BranchProductEntity } from '../database/entities/branch-product.entity';
 import { Expense } from '../database/entities/expense.entity';
 import { Product } from '../database/entities/product.entity';
+import { Purchase } from '../database/entities/purchase.entity';
+import { Sale } from '../database/entities/sale.entity';
 import { DashboardSummaryDto } from './dto/dashboard-summary.dto';
-
-/** Low-stock threshold — products with stockQty below this are flagged */
-const LOW_STOCK_THRESHOLD = 10;
 
 @Injectable()
 export class DashboardService {
@@ -22,21 +20,21 @@ export class DashboardService {
     private readonly expenseRepository: Repository<Expense>,
     @InjectRepository(Product)
     private readonly productRepository: Repository<Product>,
+    @InjectRepository(BranchProductEntity)
+    private readonly branchProductsRepository: Repository<BranchProductEntity>,
   ) {}
 
-  /**
-   * Aggregate all dashboard metrics in parallel for optimal performance.
-   * Uses COALESCE to guarantee 0 instead of null for empty result sets.
-   */
   async getSummary(): Promise<DashboardSummaryDto> {
-    // ── Date boundaries (UTC) ──
     const now = new Date();
-    const todayStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
+    const todayStart = new Date(
+      Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()),
+    );
     const tomorrowStart = new Date(todayStart.getTime() + 86_400_000);
     const monthStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
-    const nextMonthStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1));
+    const nextMonthStart = new Date(
+      Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1),
+    );
 
-    // ── Run all independent queries in parallel ──
     const [
       salesToday,
       salesMonth,
@@ -48,7 +46,6 @@ export class DashboardService {
       lowStock,
       customerCount,
     ] = await Promise.all([
-      // Sales today
       this.saleRepository
         .createQueryBuilder('sale')
         .select('COALESCE(SUM(sale.total_amount), 0)', 'total')
@@ -58,7 +55,6 @@ export class DashboardService {
         })
         .getRawOne(),
 
-      // Sales this month
       this.saleRepository
         .createQueryBuilder('sale')
         .select('COALESCE(SUM(sale.total_amount), 0)', 'total')
@@ -68,7 +64,6 @@ export class DashboardService {
         })
         .getRawOne(),
 
-      // Purchases today
       this.purchaseRepository
         .createQueryBuilder('purchase')
         .select('COALESCE(SUM(purchase.total_amount), 0)', 'total')
@@ -78,7 +73,6 @@ export class DashboardService {
         })
         .getRawOne(),
 
-      // Purchases this month
       this.purchaseRepository
         .createQueryBuilder('purchase')
         .select('COALESCE(SUM(purchase.total_amount), 0)', 'total')
@@ -88,7 +82,6 @@ export class DashboardService {
         })
         .getRawOne(),
 
-      // Expenses today (expense.date is a DATE column)
       this.expenseRepository
         .createQueryBuilder('expense')
         .select('COALESCE(SUM(expense.amount), 0)', 'total')
@@ -98,7 +91,6 @@ export class DashboardService {
         })
         .getRawOne(),
 
-      // Expenses this month
       this.expenseRepository
         .createQueryBuilder('expense')
         .select('COALESCE(SUM(expense.amount), 0)', 'total')
@@ -108,20 +100,20 @@ export class DashboardService {
         })
         .getRawOne(),
 
-      // Total products count
       this.productRepository
         .createQueryBuilder('product')
         .select('COUNT(product.id)', 'count')
         .getRawOne(),
 
-      // Low stock count
-      this.productRepository
-        .createQueryBuilder('product')
-        .select('COUNT(product.id)', 'count')
-        .where('product.stock_qty < :threshold', { threshold: LOW_STOCK_THRESHOLD })
+      this.branchProductsRepository
+        .createQueryBuilder('branchProduct')
+        .select('COUNT(branchProduct.id)', 'count')
+        .leftJoin('branchProduct.branch', 'branch')
+        .where('branchProduct.low_stock_threshold > 0')
+        .andWhere('branchProduct.stock_quantity <= branchProduct.low_stock_threshold')
+        .andWhere('branch.is_active = true')
         .getRawOne(),
 
-      // Distinct customer count (customer is a nullable string on Sale)
       this.saleRepository
         .createQueryBuilder('sale')
         .select('COUNT(DISTINCT sale.customer)', 'count')
@@ -129,7 +121,6 @@ export class DashboardService {
         .getRawOne(),
     ]);
 
-    // ── Parse results (PostgreSQL returns strings for aggregates) ──
     const totalSalesToday = parseFloat(salesToday?.total) || 0;
     const totalSalesThisMonth = parseFloat(salesMonth?.total) || 0;
     const totalPurchasesToday = parseFloat(purchasesToday?.total) || 0;
@@ -138,7 +129,10 @@ export class DashboardService {
     const totalExpensesThisMonth = parseFloat(expensesMonth?.total) || 0;
 
     const netProfitThisMonth =
-      Math.round((totalSalesThisMonth - totalPurchasesThisMonth - totalExpensesThisMonth) * 100) / 100;
+      Math.round(
+        (totalSalesThisMonth - totalPurchasesThisMonth - totalExpensesThisMonth) *
+          100,
+      ) / 100;
 
     return {
       totalSalesToday: Math.round(totalSalesToday * 100) / 100,

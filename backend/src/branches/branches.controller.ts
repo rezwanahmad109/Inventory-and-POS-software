@@ -91,7 +91,13 @@ export class BranchesController {
 
   @Patch('branch-products/:branchId/:productId')
   @Permissions('branch_products.update')
-  @Roles(RoleName.ADMIN, RoleName.MANAGER, RoleName.SUPER_ADMIN)
+  @Roles(
+    RoleName.ADMIN,
+    RoleName.MANAGER,
+    RoleName.BRANCH_MANAGER,
+    RoleName.STOCK_ADMIN,
+    RoleName.SUPER_ADMIN,
+  )
   @ApiOperation({ summary: 'Update branch-specific stock for one product' })
   updateBranchProduct(
     @Param('branchId', new ParseUUIDPipe()) branchId: string,
@@ -114,7 +120,13 @@ export class BranchesController {
 
   @Post('stock-transfers')
   @Permissions('stock_transfers.create')
-  @Roles(RoleName.ADMIN, RoleName.MANAGER, RoleName.SUPER_ADMIN)
+  @Roles(
+    RoleName.ADMIN,
+    RoleName.MANAGER,
+    RoleName.BRANCH_MANAGER,
+    RoleName.STOCK_ADMIN,
+    RoleName.SUPER_ADMIN,
+  )
   @ApiOperation({ summary: 'Transfer product stock from one branch to another' })
   @ApiResponse({ status: 201, description: 'Stock transfer created' })
   createStockTransfer(

@@ -3,6 +3,7 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 
 import { BranchesController } from './branches.controller';
 import { BranchesService } from './branches.service';
+import { QuickStockService } from './quick-stock.service';
 import { BranchEntity } from '../database/entities/branch.entity';
 import { BranchProductEntity } from '../database/entities/branch-product.entity';
 import { Product } from '../database/entities/product.entity';
@@ -18,7 +19,7 @@ import { StockTransferEntity } from '../database/entities/stock-transfer.entity'
     ]),
   ],
   controllers: [BranchesController],
-  providers: [BranchesService],
+  providers: [BranchesService, QuickStockService],
   exports: [BranchesService],
 })
 export class BranchesModule {}

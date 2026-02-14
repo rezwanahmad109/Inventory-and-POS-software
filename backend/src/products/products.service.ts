@@ -278,7 +278,7 @@ export class ProductsService {
   async findLowStockProducts(): Promise<ProductView[]> {
     const products = await this.buildProductQuery()
       .where('product.lowStockThreshold > 0')
-      .andWhere('product.stockQty < product.lowStockThreshold')
+      .andWhere('product.stockQty <= product.lowStockThreshold')
       .orderBy('product.stockQty', 'ASC')
       .addOrderBy('product.createdAt', 'DESC')
       .getMany();
@@ -327,7 +327,7 @@ export class ProductsService {
     }
 
     const crossedBelowThreshold =
-      previousStockQty >= threshold && product.stockQty < threshold;
+      previousStockQty > threshold && product.stockQty <= threshold;
     if (!crossedBelowThreshold) {
       return;
     }
@@ -392,7 +392,7 @@ export class ProductsService {
     return {
       ...product,
       stockValue,
-      isLowStock: threshold > 0 && product.stockQty < threshold,
+      isLowStock: threshold > 0 && product.stockQty <= threshold,
     };
   }
 
