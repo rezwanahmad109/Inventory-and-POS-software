@@ -6,6 +6,9 @@ import { Sale } from '../database/entities/sale.entity';
 import { Purchase } from '../database/entities/purchase.entity';
 import { Expense } from '../database/entities/expense.entity';
 import { Product } from '../database/entities/product.entity';
+import { PurchasePayment } from '../database/entities/purchase-payment.entity';
+import { SaleItem } from '../database/entities/sale-item.entity';
+import { SalePayment } from '../database/entities/sale-payment.entity';
 import { DashboardController } from './dashboard.controller';
 import { DashboardService } from './dashboard.service';
 
@@ -17,6 +20,9 @@ import { DashboardService } from './dashboard.service';
       Expense,
       Product,
       BranchProductEntity,
+      SaleItem,
+      SalePayment,
+      PurchasePayment,
     ]),
   ],
   controllers: [DashboardController],

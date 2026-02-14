@@ -6,6 +6,8 @@ import { AuthModule } from './auth/auth.module';
 import { BranchesModule } from './branches/branches.module';
 import { CategoriesModule } from './categories/categories.module';
 import { CashflowModule } from './cashflow/cashflow.module';
+import { CompanySettingsModule } from './company-settings/company-settings.module';
+import { CommonModule } from './common/common.module';
 import { CustomersModule } from './customers/customers.module';
 import { DashboardModule } from './dashboard/dashboard.module';
 import { DatabaseModule } from './database/database.module';
@@ -15,8 +17,10 @@ import { BankStatementLine } from './database/entities/bank-statement-line.entit
 import { BranchEntity } from './database/entities/branch.entity';
 import { BranchProductEntity } from './database/entities/branch-product.entity';
 import { Customer } from './database/entities/customer.entity';
+import { EmailTemplateEntity } from './database/entities/email-template.entity';
 import { ExpenseCategory } from './database/entities/expense-category.entity';
 import { Expense } from './database/entities/expense.entity';
+import { FileAttachmentEntity } from './database/entities/file-attachment.entity';
 import { FinanceAccount } from './database/entities/finance-account.entity';
 import { FinanceInvoice } from './database/entities/finance-invoice.entity';
 import { FinanceParty } from './database/entities/finance-party.entity';
@@ -27,7 +31,9 @@ import { JournalEntry, JournalLine } from './database/entities/journal-entry.ent
 import { Payment } from './database/entities/payment.entity';
 import { PaymentAllocation } from './database/entities/payment-allocation.entity';
 import { Permission } from './database/entities/permission.entity';
+import { PriceTierEntity } from './database/entities/price-tier.entity';
 import { PosOrder } from './database/entities/pos-order.entity';
+import { ProductPriceTierEntity } from './database/entities/product-price-tier.entity';
 import { Category, Product, Unit } from './database/entities/product.entity';
 import { PurchaseItem } from './database/entities/purchase-item.entity';
 import { PurchasePayment } from './database/entities/purchase-payment.entity';
@@ -46,13 +52,17 @@ import { SalesReturnItem } from './database/entities/sales-return-item.entity';
 import { Setting } from './database/entities/setting.entity';
 import { StockLedgerEntry } from './database/entities/stock-ledger.entity';
 import { StockTransferEntity } from './database/entities/stock-transfer.entity';
+import { SubscriptionPlanEntity } from './database/entities/subscription-plan.entity';
 import { Supplier } from './database/entities/supplier.entity';
+import { TaxEntity } from './database/entities/tax.entity';
 import { User } from './database/entities/user.entity';
 import { UserRole } from './database/entities/user-role.entity';
 import { ExpensesModule } from './expenses/expenses.module';
 import { FinanceModule } from './finance/finance.module';
+import { NotificationsModule } from './notifications/notifications.module';
 import { PaymentsModule } from './payments/payments.module';
 import { PermissionsModule } from './permissions/permissions.module';
+import { PriceTiersModule } from './price-tiers/price-tiers.module';
 import { PurchaseModule } from './purchase/purchase.module';
 import { PurchaseReturnModule } from './purchase-return/purchase-return.module';
 import { ProductsModule } from './products/products.module';
@@ -62,10 +72,14 @@ import { RolesModule } from './roles/roles.module';
 import { SalesModule } from './sales/sales.module';
 import { SalesReturnModule } from './sales-return/sales-return.module';
 import { SettingsModule } from './settings/settings.module';
+import { SubscriptionPlansModule } from './subscription-plans/subscription-plans.module';
 import { SupplierModule } from './supplier/supplier.module';
+import { TaxesModule } from './taxes/taxes.module';
+import { UploadsModule } from './uploads/uploads.module';
 import { UnitsModule } from './units/units.module';
 import { UserRolesModule } from './user-roles/user-roles.module';
 import { UsersModule } from './users/users.module';
+import { WarehousesModule } from './warehouses/warehouses.module';
 import { WalletTransaction } from './database/entities/wallet-transaction.entity';
 import { Wallet } from './database/entities/wallet.entity';
 import { validateEnv } from './config/env.validation';
@@ -135,6 +149,12 @@ import { validateEnv } from './config/env.validation';
             JournalLine,
             Wallet,
             WalletTransaction,
+            TaxEntity,
+            PriceTierEntity,
+            ProductPriceTierEntity,
+            SubscriptionPlanEntity,
+            EmailTemplateEntity,
+            FileAttachmentEntity,
             BankStatement,
             BankStatementLine,
             ReconciliationMatch,
@@ -147,6 +167,7 @@ import { validateEnv } from './config/env.validation';
         };
       },
     }),
+    CommonModule,
     DatabaseModule,
     UsersModule,
     AuthModule,
@@ -164,6 +185,13 @@ import { validateEnv } from './config/env.validation';
     PurchaseReturnModule,
     ExpensesModule,
     SettingsModule,
+    CompanySettingsModule,
+    TaxesModule,
+    WarehousesModule,
+    SubscriptionPlansModule,
+    PriceTiersModule,
+    UploadsModule,
+    NotificationsModule,
     DashboardModule,
     CustomersModule,
     PaymentsModule,

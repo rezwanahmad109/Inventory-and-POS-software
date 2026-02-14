@@ -5,8 +5,9 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { DataSource, Repository } from 'typeorm';
+import { Repository } from 'typeorm';
 
+import { TransactionRunnerService } from '../../common/services/transaction-runner.service';
 import { WalletTransaction } from '../../database/entities/wallet-transaction.entity';
 import { Wallet } from '../../database/entities/wallet.entity';
 import { CreateWalletDto } from '../dto/create-wallet.dto';
@@ -21,7 +22,7 @@ export class WalletsService {
     private readonly walletRepository: Repository<Wallet>,
     @InjectRepository(WalletTransaction)
     private readonly walletTransactionRepository: Repository<WalletTransaction>,
-    private readonly dataSource: DataSource,
+    private readonly transactionRunner: TransactionRunnerService,
   ) {}
 
   async create(dto: CreateWalletDto): Promise<Wallet> {
@@ -101,7 +102,7 @@ export class WalletsService {
       throw new BadRequestException('fromWalletId and toWalletId must be different.');
     }
 
-    return this.dataSource.transaction(async (manager) => {
+    return this.transactionRunner.runInTransaction(async (manager) => {
       if (dto.idempotencyKey) {
         const existingOut = await manager.findOne(WalletTransaction, {
           where: {
@@ -210,7 +211,7 @@ export class WalletsService {
     direction: 'in' | 'out',
     actorId?: string,
   ): Promise<Wallet> {
-    return this.dataSource.transaction(async (manager) => {
+    return this.transactionRunner.runInTransaction(async (manager) => {
       const wallet = await manager.findOne(Wallet, {
         where: { id: walletId },
         lock: { mode: 'pessimistic_write' },

@@ -5,17 +5,30 @@ import { Repository } from 'typeorm';
 import { BranchProductEntity } from '../database/entities/branch-product.entity';
 import { Expense } from '../database/entities/expense.entity';
 import { Product } from '../database/entities/product.entity';
+import { PurchasePayment } from '../database/entities/purchase-payment.entity';
 import { Purchase } from '../database/entities/purchase.entity';
+import { SaleItem } from '../database/entities/sale-item.entity';
+import { SalePayment } from '../database/entities/sale-payment.entity';
 import { Sale } from '../database/entities/sale.entity';
-import { DashboardSummaryDto } from './dto/dashboard-summary.dto';
+import {
+  DashboardChartPointDto,
+  DashboardSummaryDto,
+  DashboardTopSellingProductDto,
+} from './dto/dashboard-summary.dto';
 
 @Injectable()
 export class DashboardService {
   constructor(
     @InjectRepository(Sale)
     private readonly saleRepository: Repository<Sale>,
+    @InjectRepository(SaleItem)
+    private readonly saleItemRepository: Repository<SaleItem>,
+    @InjectRepository(SalePayment)
+    private readonly salePaymentRepository: Repository<SalePayment>,
     @InjectRepository(Purchase)
     private readonly purchaseRepository: Repository<Purchase>,
+    @InjectRepository(PurchasePayment)
+    private readonly purchasePaymentRepository: Repository<PurchasePayment>,
     @InjectRepository(Expense)
     private readonly expenseRepository: Repository<Expense>,
     @InjectRepository(Product)
@@ -45,6 +58,12 @@ export class DashboardService {
       productStats,
       lowStock,
       customerCount,
+      saleDueTotals,
+      paymentsReceived,
+      paymentsSent,
+      topSellingProducts,
+      salesChart,
+      paymentsChart,
     ] = await Promise.all([
       this.saleRepository
         .createQueryBuilder('sale')
@@ -53,7 +72,7 @@ export class DashboardService {
           start: todayStart.toISOString(),
           end: tomorrowStart.toISOString(),
         })
-        .getRawOne(),
+        .getRawOne<{ total: string }>(),
 
       this.saleRepository
         .createQueryBuilder('sale')
@@ -62,7 +81,7 @@ export class DashboardService {
           start: monthStart.toISOString(),
           end: nextMonthStart.toISOString(),
         })
-        .getRawOne(),
+        .getRawOne<{ total: string }>(),
 
       this.purchaseRepository
         .createQueryBuilder('purchase')
@@ -71,7 +90,7 @@ export class DashboardService {
           start: todayStart.toISOString(),
           end: tomorrowStart.toISOString(),
         })
-        .getRawOne(),
+        .getRawOne<{ total: string }>(),
 
       this.purchaseRepository
         .createQueryBuilder('purchase')
@@ -80,7 +99,7 @@ export class DashboardService {
           start: monthStart.toISOString(),
           end: nextMonthStart.toISOString(),
         })
-        .getRawOne(),
+        .getRawOne<{ total: string }>(),
 
       this.expenseRepository
         .createQueryBuilder('expense')
@@ -89,7 +108,7 @@ export class DashboardService {
           start: todayStart.toISOString().slice(0, 10),
           end: tomorrowStart.toISOString().slice(0, 10),
         })
-        .getRawOne(),
+        .getRawOne<{ total: string }>(),
 
       this.expenseRepository
         .createQueryBuilder('expense')
@@ -98,12 +117,12 @@ export class DashboardService {
           start: monthStart.toISOString().slice(0, 10),
           end: nextMonthStart.toISOString().slice(0, 10),
         })
-        .getRawOne(),
+        .getRawOne<{ total: string }>(),
 
       this.productRepository
         .createQueryBuilder('product')
         .select('COUNT(product.id)', 'count')
-        .getRawOne(),
+        .getRawOne<{ count: string }>(),
 
       this.branchProductsRepository
         .createQueryBuilder('branchProduct')
@@ -112,39 +131,198 @@ export class DashboardService {
         .where('branchProduct.low_stock_threshold > 0')
         .andWhere('branchProduct.stock_quantity <= branchProduct.low_stock_threshold')
         .andWhere('branch.is_active = true')
-        .getRawOne(),
+        .getRawOne<{ count: string }>(),
 
       this.saleRepository
         .createQueryBuilder('sale')
-        .select('COUNT(DISTINCT sale.customer)', 'count')
-        .where('sale.customer IS NOT NULL')
-        .getRawOne(),
+        .select('COUNT(DISTINCT sale.customer_id)', 'count')
+        .where('sale.customer_id IS NOT NULL')
+        .getRawOne<{ count: string }>(),
+
+      this.saleRepository
+        .createQueryBuilder('sale')
+        .select('COALESCE(SUM(sale.due_total), 0)', 'total')
+        .where('sale.document_type = :docType', { docType: 'invoice' })
+        .getRawOne<{ total: string }>(),
+
+      this.salePaymentRepository
+        .createQueryBuilder('payment')
+        .select('COALESCE(SUM(payment.amount), 0)', 'total')
+        .where('payment.created_at >= :start AND payment.created_at < :end', {
+          start: monthStart.toISOString(),
+          end: nextMonthStart.toISOString(),
+        })
+        .getRawOne<{ total: string }>(),
+
+      this.purchasePaymentRepository
+        .createQueryBuilder('payment')
+        .select('COALESCE(SUM(payment.amount), 0)', 'total')
+        .where('payment.created_at >= :start AND payment.created_at < :end', {
+          start: monthStart.toISOString(),
+          end: nextMonthStart.toISOString(),
+        })
+        .getRawOne<{ total: string }>(),
+
+      this.getTopSellingProducts(monthStart, nextMonthStart),
+      this.getSalesChartPoints(14),
+      this.getPaymentsChartPoints(14),
     ]);
 
-    const totalSalesToday = parseFloat(salesToday?.total) || 0;
-    const totalSalesThisMonth = parseFloat(salesMonth?.total) || 0;
-    const totalPurchasesToday = parseFloat(purchasesToday?.total) || 0;
-    const totalPurchasesThisMonth = parseFloat(purchasesMonth?.total) || 0;
-    const totalExpensesToday = parseFloat(expensesToday?.total) || 0;
-    const totalExpensesThisMonth = parseFloat(expensesMonth?.total) || 0;
-
-    const netProfitThisMonth =
-      Math.round(
-        (totalSalesThisMonth - totalPurchasesThisMonth - totalExpensesThisMonth) *
-          100,
-      ) / 100;
+    const totalSalesToday = this.toMoney(salesToday?.total);
+    const totalSalesThisMonth = this.toMoney(salesMonth?.total);
+    const totalPurchasesToday = this.toMoney(purchasesToday?.total);
+    const totalPurchasesThisMonth = this.toMoney(purchasesMonth?.total);
+    const totalExpensesToday = this.toMoney(expensesToday?.total);
+    const totalExpensesThisMonth = this.toMoney(expensesMonth?.total);
+    const totalDue = this.toMoney(saleDueTotals?.total);
+    const totalPaymentsReceived = this.toMoney(paymentsReceived?.total);
+    const totalPaymentsSent = this.toMoney(paymentsSent?.total);
 
     return {
-      totalSalesToday: Math.round(totalSalesToday * 100) / 100,
-      totalSalesThisMonth: Math.round(totalSalesThisMonth * 100) / 100,
-      netProfitThisMonth,
-      totalPurchasesToday: Math.round(totalPurchasesToday * 100) / 100,
-      totalPurchasesThisMonth: Math.round(totalPurchasesThisMonth * 100) / 100,
-      totalExpensesToday: Math.round(totalExpensesToday * 100) / 100,
-      totalExpensesThisMonth: Math.round(totalExpensesThisMonth * 100) / 100,
-      totalProducts: Number(productStats?.count) || 0,
-      lowStockItems: Number(lowStock?.count) || 0,
-      totalCustomers: Number(customerCount?.count) || 0,
+      totalSalesToday,
+      totalSalesThisMonth,
+      totalDue,
+      totalPaymentsReceived,
+      totalPaymentsSent,
+      netProfitThisMonth: this.toMoney(
+        totalSalesThisMonth - totalPurchasesThisMonth - totalExpensesThisMonth,
+      ),
+      totalPurchasesToday,
+      totalPurchasesThisMonth,
+      totalExpensesToday,
+      totalExpensesThisMonth,
+      totalProducts: Number(productStats?.count ?? 0),
+      lowStockItems: Number(lowStock?.count ?? 0),
+      totalCustomers: Number(customerCount?.count ?? 0),
+      topSellingProducts,
+      salesChart,
+      paymentsChart,
     };
+  }
+
+  private async getTopSellingProducts(
+    from: Date,
+    to: Date,
+  ): Promise<DashboardTopSellingProductDto[]> {
+    const rows = await this.saleItemRepository
+      .createQueryBuilder('item')
+      .innerJoin('item.sale', 'sale')
+      .innerJoin('item.product', 'product')
+      .select('item.product_id', 'productId')
+      .addSelect('product.name', 'productName')
+      .addSelect('product.sku', 'sku')
+      .addSelect('COALESCE(SUM(item.quantity), 0)', 'quantitySold')
+      .addSelect('COALESCE(SUM(item.line_total), 0)', 'revenue')
+      .where('sale.document_type = :docType', { docType: 'invoice' })
+      .andWhere('sale.created_at >= :start AND sale.created_at < :end', {
+        start: from.toISOString(),
+        end: to.toISOString(),
+      })
+      .groupBy('item.product_id')
+      .addGroupBy('product.name')
+      .addGroupBy('product.sku')
+      .orderBy('SUM(item.quantity)', 'DESC')
+      .addOrderBy('SUM(item.line_total)', 'DESC')
+      .limit(5)
+      .getRawMany<{
+        productId: string;
+        productName: string;
+        sku: string;
+        quantitySold: string;
+        revenue: string;
+      }>();
+
+    return rows.map((row) => ({
+      productId: row.productId,
+      productName: row.productName,
+      sku: row.sku,
+      quantitySold: Number(row.quantitySold ?? 0),
+      revenue: this.toMoney(row.revenue),
+    }));
+  }
+
+  private async getSalesChartPoints(days: number): Promise<DashboardChartPointDto[]> {
+    const labels = this.buildUtcDayLabels(days);
+    const start = new Date(`${labels[0]}T00:00:00.000Z`);
+
+    const rows = await this.saleRepository
+      .createQueryBuilder('sale')
+      .select(
+        `TO_CHAR(DATE_TRUNC('day', sale.created_at AT TIME ZONE 'UTC'), 'YYYY-MM-DD')`,
+        'day',
+      )
+      .addSelect('COALESCE(SUM(sale.total_amount), 0)', 'total')
+      .where('sale.created_at >= :start', { start: start.toISOString() })
+      .andWhere('sale.document_type = :docType', { docType: 'invoice' })
+      .groupBy(`DATE_TRUNC('day', sale.created_at AT TIME ZONE 'UTC')`)
+      .orderBy(`DATE_TRUNC('day', sale.created_at AT TIME ZONE 'UTC')`, 'ASC')
+      .getRawMany<{ day: string; total: string }>();
+
+    const map = new Map(rows.map((row) => [row.day, this.toMoney(row.total)]));
+    return labels.map((label) => ({
+      label,
+      value: map.get(label) ?? 0,
+    }));
+  }
+
+  private async getPaymentsChartPoints(
+    days: number,
+  ): Promise<DashboardChartPointDto[]> {
+    const labels = this.buildUtcDayLabels(days);
+    const start = new Date(`${labels[0]}T00:00:00.000Z`);
+
+    const receivedRows = await this.salePaymentRepository
+      .createQueryBuilder('payment')
+      .select(
+        `TO_CHAR(DATE_TRUNC('day', payment.created_at AT TIME ZONE 'UTC'), 'YYYY-MM-DD')`,
+        'day',
+      )
+      .addSelect('COALESCE(SUM(payment.amount), 0)', 'total')
+      .where('payment.created_at >= :start', { start: start.toISOString() })
+      .groupBy(`DATE_TRUNC('day', payment.created_at AT TIME ZONE 'UTC')`)
+      .getRawMany<{ day: string; total: string }>();
+
+    const sentRows = await this.purchasePaymentRepository
+      .createQueryBuilder('payment')
+      .select(
+        `TO_CHAR(DATE_TRUNC('day', payment.created_at AT TIME ZONE 'UTC'), 'YYYY-MM-DD')`,
+        'day',
+      )
+      .addSelect('COALESCE(SUM(payment.amount), 0)', 'total')
+      .where('payment.created_at >= :start', { start: start.toISOString() })
+      .groupBy(`DATE_TRUNC('day', payment.created_at AT TIME ZONE 'UTC')`)
+      .getRawMany<{ day: string; total: string }>();
+
+    const receivedMap = new Map(
+      receivedRows.map((row) => [row.day, this.toMoney(row.total)]),
+    );
+    const sentMap = new Map(sentRows.map((row) => [row.day, this.toMoney(row.total)]));
+
+    return labels.map((label) => ({
+      label,
+      value: this.toMoney((receivedMap.get(label) ?? 0) - (sentMap.get(label) ?? 0)),
+    }));
+  }
+
+  private buildUtcDayLabels(days: number): string[] {
+    const labels: string[] = [];
+    const now = new Date();
+
+    for (let i = days - 1; i >= 0; i -= 1) {
+      const date = new Date(
+        Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() - i),
+      );
+      labels.push(date.toISOString().slice(0, 10));
+    }
+
+    return labels;
+  }
+
+  private toMoney(value: string | number | null | undefined): number {
+    const numeric = Number(value ?? 0);
+    if (Number.isNaN(numeric)) {
+      return 0;
+    }
+    return Number(numeric.toFixed(2));
   }
 }

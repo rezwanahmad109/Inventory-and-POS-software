@@ -7,7 +7,6 @@ import {
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import {
-  DataSource,
   EntityManager,
   MoreThan,
   Repository,
@@ -18,6 +17,7 @@ import { CreateBranchDto } from './dto/create-branch.dto';
 import { QuickStockService } from './quick-stock.service';
 import { StockTransferDto } from './dto/stock-transfer.dto';
 import { UpdateBranchDto } from './dto/update-branch.dto';
+import { TransactionRunnerService } from '../common/services/transaction-runner.service';
 import { BranchEntity } from '../database/entities/branch.entity';
 import { BranchProductEntity } from '../database/entities/branch-product.entity';
 import { Product } from '../database/entities/product.entity';
@@ -41,6 +41,17 @@ export interface BranchProductView {
   product: Product;
 }
 
+export interface WarehouseStockLevelView {
+  branchId: string;
+  branchName: string;
+  productId: string;
+  productName: string;
+  sku: string;
+  stockQuantity: number;
+  lowStockThreshold: number;
+  stockValue: number;
+}
+
 @Injectable()
 export class BranchesService {
   private readonly logger = new Logger(BranchesService.name);
@@ -55,7 +66,7 @@ export class BranchesService {
     @InjectRepository(Product)
     private readonly productsRepository: Repository<Product>,
     private readonly quickStockService: QuickStockService,
-    private readonly dataSource: DataSource,
+    private readonly transactionRunner: TransactionRunnerService,
   ) {}
 
   async createBranch(createBranchDto: CreateBranchDto): Promise<BranchEntity> {
@@ -154,7 +165,7 @@ export class BranchesService {
     productId: string,
     branchProductDto: BranchProductDto,
   ): Promise<BranchProductView> {
-    return this.dataSource.transaction(async (manager) => {
+    return this.transactionRunner.runInTransaction(async (manager) => {
       const branch = await this.getBranchOrFail(branchId, manager);
       if (!branch.isActive) {
         throw new BadRequestException(
@@ -270,7 +281,7 @@ export class BranchesService {
       );
     }
 
-    return this.dataSource.transaction(async (manager) => {
+    return this.transactionRunner.runInTransaction(async (manager) => {
       const fromBranch = await this.getBranchOrFail(
         stockTransferDto.fromBranchId,
         manager,
@@ -293,23 +304,6 @@ export class BranchesService {
         );
       }
 
-      await this.applyBranchStockDelta(
-        manager,
-        fromBranch.id,
-        product,
-        -stockTransferDto.quantity,
-        'stock_transfer_out',
-        false,
-      );
-      await this.applyBranchStockDelta(
-        manager,
-        toBranch.id,
-        product,
-        stockTransferDto.quantity,
-        'stock_transfer_in',
-        false,
-      );
-
       const transfer = manager.create(StockTransferEntity, {
         fromBranch,
         fromBranchId: fromBranch.id,
@@ -319,7 +313,14 @@ export class BranchesService {
         productId: product.id,
         quantity: stockTransferDto.quantity,
         initiatedBy,
-        status: StockTransferStatus.COMPLETED,
+        status: StockTransferStatus.PENDING_APPROVAL,
+        notes: stockTransferDto.notes?.trim() ?? null,
+        approvedAt: null,
+        approvedBy: null,
+        receivedAt: null,
+        receivedBy: null,
+        cancelledAt: null,
+        cancelledBy: null,
       });
 
       const saved = await manager.save(StockTransferEntity, transfer);
@@ -333,6 +334,146 @@ export class BranchesService {
 
       return reloaded;
     });
+  }
+
+  async approveStockTransfer(
+    transferId: string,
+    approvedBy: string,
+    note?: string,
+  ): Promise<StockTransferEntity> {
+    return this.transactionRunner.runInTransaction(async (manager) => {
+      const transfer = await manager.findOne(StockTransferEntity, {
+        where: { id: transferId },
+        lock: { mode: 'pessimistic_write' },
+      });
+      if (!transfer) {
+        throw new NotFoundException(`Stock transfer "${transferId}" not found.`);
+      }
+      if (transfer.status !== StockTransferStatus.PENDING_APPROVAL) {
+        throw new BadRequestException(
+          'Only pending stock transfers can be approved.',
+        );
+      }
+
+      const product = await manager.findOne(Product, {
+        where: { id: transfer.productId },
+        lock: { mode: 'pessimistic_write' },
+      });
+      if (!product) {
+        throw new NotFoundException(`Product "${transfer.productId}" not found.`);
+      }
+
+      await this.applyBranchStockDelta(
+        manager,
+        transfer.fromBranchId,
+        product,
+        -transfer.quantity,
+        'stock_transfer_approved',
+        false,
+      );
+
+      transfer.status = StockTransferStatus.APPROVED;
+      transfer.approvedBy = approvedBy;
+      transfer.approvedAt = new Date();
+      if (note !== undefined) {
+        transfer.notes = note.trim() || transfer.notes;
+      }
+
+      return manager.save(StockTransferEntity, transfer);
+    });
+  }
+
+  async receiveStockTransfer(
+    transferId: string,
+    receivedBy: string,
+    note?: string,
+  ): Promise<StockTransferEntity> {
+    return this.transactionRunner.runInTransaction(async (manager) => {
+      const transfer = await manager.findOne(StockTransferEntity, {
+        where: { id: transferId },
+        lock: { mode: 'pessimistic_write' },
+      });
+      if (!transfer) {
+        throw new NotFoundException(`Stock transfer "${transferId}" not found.`);
+      }
+      if (transfer.status !== StockTransferStatus.APPROVED) {
+        throw new BadRequestException(
+          'Only approved stock transfers can be received.',
+        );
+      }
+
+      const product = await manager.findOne(Product, {
+        where: { id: transfer.productId },
+        lock: { mode: 'pessimistic_write' },
+      });
+      if (!product) {
+        throw new NotFoundException(`Product "${transfer.productId}" not found.`);
+      }
+
+      await this.applyBranchStockDelta(
+        manager,
+        transfer.toBranchId,
+        product,
+        transfer.quantity,
+        'stock_transfer_received',
+        false,
+      );
+
+      transfer.status = StockTransferStatus.RECEIVED;
+      transfer.receivedBy = receivedBy;
+      transfer.receivedAt = new Date();
+      if (note !== undefined) {
+        transfer.notes = note.trim() || transfer.notes;
+      }
+
+      return manager.save(StockTransferEntity, transfer);
+    });
+  }
+
+  async getWarehouseStockLevels(
+    branchId?: string,
+  ): Promise<WarehouseStockLevelView[]> {
+    const query = this.branchProductsRepository
+      .createQueryBuilder('branchProduct')
+      .leftJoin('branchProduct.branch', 'branch')
+      .leftJoin('branchProduct.product', 'product')
+      .select('branch.id', 'branchId')
+      .addSelect('branch.name', 'branchName')
+      .addSelect('product.id', 'productId')
+      .addSelect('product.name', 'productName')
+      .addSelect('product.sku', 'sku')
+      .addSelect('branchProduct.stock_quantity', 'stockQuantity')
+      .addSelect('branchProduct.low_stock_threshold', 'lowStockThreshold')
+      .addSelect('(branchProduct.stock_quantity * product.price)', 'stockValue')
+      .where('branch.is_active = true')
+      .orderBy('branch.name', 'ASC')
+      .addOrderBy('product.name', 'ASC');
+
+    if (branchId) {
+      query.andWhere('branch.id = :branchId', { branchId });
+    }
+
+    const rows = await query.getRawMany<{
+      branchId: string;
+      branchName: string;
+      productId: string;
+      productName: string;
+      sku: string;
+      stockQuantity: string;
+      lowStockThreshold: string;
+      stockValue: string;
+    }>();
+
+    return rows.map((row) => ({
+      branchId: row.branchId,
+      branchName: row.branchName,
+      productId: row.productId,
+      productName: row.productName,
+      sku: row.sku,
+      stockQuantity: Number(row.stockQuantity ?? 0),
+      lowStockThreshold: Number(row.lowStockThreshold ?? 0),
+      stockValue: Number(Number(row.stockValue ?? 0).toFixed(2)),
+    }));
   }
 
   async getStockTransferHistory(): Promise<StockTransferEntity[]> {

@@ -49,6 +49,12 @@ export class SaleItem {
   })
   unitPrice!: number;
 
+  @Column({ name: 'price_tier_id', nullable: true })
+  priceTierId!: string | null;
+
+  @Column({ name: 'price_tier_name', length: 120, nullable: true })
+  priceTierName!: string | null;
+
   @Column({
     name: 'line_discount_type',
     type: 'enum',

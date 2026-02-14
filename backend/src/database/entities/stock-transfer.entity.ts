@@ -11,8 +11,9 @@ import { BranchEntity } from './branch.entity';
 import { Product } from './product.entity';
 
 export enum StockTransferStatus {
-  PENDING = 'pending',
-  COMPLETED = 'completed',
+  PENDING_APPROVAL = 'pending_approval',
+  APPROVED = 'approved',
+  RECEIVED = 'received',
   CANCELLED = 'cancelled',
 }
 
@@ -63,9 +64,30 @@ export class StockTransferEntity {
   @Column({
     type: 'enum',
     enum: StockTransferStatus,
-    default: StockTransferStatus.COMPLETED,
+    default: StockTransferStatus.PENDING_APPROVAL,
   })
   status!: StockTransferStatus;
+
+  @Column({ name: 'approved_by', length: 160, nullable: true })
+  approvedBy!: string | null;
+
+  @Column({ name: 'approved_at', type: 'timestamptz', nullable: true })
+  approvedAt!: Date | null;
+
+  @Column({ name: 'received_by', length: 160, nullable: true })
+  receivedBy!: string | null;
+
+  @Column({ name: 'received_at', type: 'timestamptz', nullable: true })
+  receivedAt!: Date | null;
+
+  @Column({ name: 'cancelled_by', length: 160, nullable: true })
+  cancelledBy!: string | null;
+
+  @Column({ name: 'cancelled_at', type: 'timestamptz', nullable: true })
+  cancelledAt!: Date | null;
+
+  @Column({ type: 'text', nullable: true })
+  notes!: string | null;
 
   @CreateDateColumn({ name: 'timestamp' })
   timestamp!: Date;

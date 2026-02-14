@@ -4,10 +4,13 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { DataSource, EntityManager, Repository } from 'typeorm';
+import { EntityManager, Repository } from 'typeorm';
 
 import { BranchesService } from '../branches/branches.service';
 import { SaleStatus } from '../common/enums/sale-status.enum';
+import { AccountingEventBusService } from '../common/services/accounting-event-bus.service';
+import { PartyBalanceService } from '../common/services/party-balance.service';
+import { TransactionRunnerService } from '../common/services/transaction-runner.service';
 import { Customer } from '../database/entities/customer.entity';
 import { Product } from '../database/entities/product.entity';
 import { Sale } from '../database/entities/sale.entity';
@@ -26,8 +29,10 @@ export class SalesReturnService {
   constructor(
     @InjectRepository(SalesReturn)
     private readonly salesReturnRepository: Repository<SalesReturn>,
-    private readonly dataSource: DataSource,
+    private readonly accountingEventBus: AccountingEventBusService,
+    private readonly transactionRunner: TransactionRunnerService,
     private readonly branchesService: BranchesService,
+    private readonly partyBalanceService: PartyBalanceService,
   ) {}
 
   /**
@@ -42,7 +47,7 @@ export class SalesReturnService {
     createSalesReturnDto: CreateSalesReturnDto,
     actorUserId?: string,
   ): Promise<SalesReturn> {
-    return this.dataSource.transaction(async (manager) => {
+    const salesReturn = await this.transactionRunner.runInTransaction(async (manager) => {
       // Validate original sale exists
       const originalSale = await manager.findOne(Sale, {
         where: { id: createSalesReturnDto.originalSaleId },
@@ -216,6 +221,14 @@ export class SalesReturnService {
       createdReturn.returnedItems = persistedItems;
       return createdReturn;
     });
+
+    this.accountingEventBus.publish('sales_return.created', {
+      salesReturnId: salesReturn.id,
+      totalRefund: salesReturn.totalRefund,
+      branchId: salesReturn.originalSale?.branchId ?? null,
+      occurredAt: salesReturn.returnDate ?? new Date(),
+    });
+    return salesReturn;
   }
 
   /**
@@ -251,16 +264,11 @@ export class SalesReturnService {
     customerId: number,
     amountDelta: number,
   ): Promise<void> {
-    if (amountDelta === 0) {
-      return;
-    }
-
-    await manager
-      .createQueryBuilder()
-      .update(Customer)
-      .set({ totalDue: () => `GREATEST(total_due + ${amountDelta}, 0)` })
-      .where('id = :id', { id: customerId })
-      .execute();
+    await this.partyBalanceService.adjustCustomerDue(
+      manager,
+      customerId,
+      amountDelta,
+    );
   }
 
   private async generateCreditNoteNumber(manager: EntityManager): Promise<string> {

@@ -4,6 +4,7 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { BranchesModule } from '../branches/branches.module';
 import { Product } from '../database/entities/product.entity';
 import { ProductsModule } from '../products/products.module';
+import { NotificationsModule } from '../notifications/notifications.module';
 import { PurchaseItem } from '../database/entities/purchase-item.entity';
 import { PurchasePayment } from '../database/entities/purchase-payment.entity';
 import { Purchase } from '../database/entities/purchase.entity';
@@ -22,6 +23,7 @@ import { PurchaseService } from './purchase.service';
     ]),
     ProductsModule,
     BranchesModule,
+    NotificationsModule,
   ],
   controllers: [PurchaseController],
   providers: [PurchaseService],

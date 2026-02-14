@@ -278,6 +278,9 @@ export class Sale {
   @Column({ type: 'text', nullable: true })
   notes!: string | null;
 
+  @Column({ type: 'jsonb', nullable: true })
+  attachments!: string[] | null;
+
   @CreateDateColumn({ name: 'created_at' })
   createdAt!: Date;
 

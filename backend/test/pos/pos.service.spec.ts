@@ -3,6 +3,7 @@ import { getRepositoryToken } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
 
 import { PosOrder } from '../../src/database/entities/pos-order.entity';
+import { ProductPriceTierEntity } from '../../src/database/entities/product-price-tier.entity';
 import { Product } from '../../src/database/entities/product.entity';
 import { ProductsService } from '../../src/products/products.service';
 import { SalesService } from '../../src/sales/sales.service';
@@ -19,6 +20,10 @@ describe('PosService', () => {
   };
 
   const productsRepository = {
+    find: jest.fn(),
+  };
+
+  const productPriceTierRepository = {
     find: jest.fn(),
   };
 
@@ -50,6 +55,10 @@ describe('PosService', () => {
           useValue: productsRepository,
         },
         {
+          provide: getRepositoryToken(ProductPriceTierEntity),
+          useValue: productPriceTierRepository,
+        },
+        {
           provide: ProductsService,
           useValue: productsService,
         },
@@ -76,6 +85,7 @@ describe('PosService', () => {
         taxMethod: TaxMethod.EXCLUSIVE,
       } as Product,
     ]);
+    productPriceTierRepository.find.mockResolvedValue([]);
 
     const manager = {
       count: jest.fn().mockResolvedValue(0),

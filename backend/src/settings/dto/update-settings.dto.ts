@@ -30,6 +30,10 @@ export class UpdateSettingsDto {
   @IsUrl()
   logoUrl?: string;
 
+  @IsOptional()
+  @IsUrl()
+  secondaryLogoUrl?: string;
+
   /** Business display name */
   @IsOptional()
   @IsString()
@@ -40,6 +44,16 @@ export class UpdateSettingsDto {
   @IsOptional()
   @IsString()
   footerNote?: string;
+
+  @IsOptional()
+  @IsString()
+  @MinLength(1)
+  theme?: string;
+
+  @IsOptional()
+  @IsString()
+  @MinLength(1)
+  timeZone?: string;
 
   @IsOptional()
   @IsObject()

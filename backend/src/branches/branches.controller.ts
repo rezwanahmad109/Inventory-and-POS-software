@@ -7,6 +7,7 @@ import {
   ParseUUIDPipe,
   Patch,
   Post,
+  Query,
   Put,
   Req,
   UseGuards,
@@ -20,7 +21,9 @@ import {
 import { Request } from 'express';
 
 import { BranchProductDto } from './dto/branch-product.dto';
+import { ApproveStockTransferDto } from './dto/approve-stock-transfer.dto';
 import { CreateBranchDto } from './dto/create-branch.dto';
+import { ReceiveStockTransferDto } from './dto/receive-stock-transfer.dto';
 import { StockTransferDto } from './dto/stock-transfer.dto';
 import { UpdateBranchDto } from './dto/update-branch.dto';
 import { BranchesService } from './branches.service';
@@ -118,6 +121,15 @@ export class BranchesController {
     return this.branchesService.getLowStockAcrossBranches();
   }
 
+  @Get('warehouses/stock-levels')
+  @Permissions('branch_products.read')
+  @ApiOperation({
+    summary: 'Get product stock levels across all warehouses (or by warehouse)',
+  })
+  getWarehouseStockLevels(@Query('branchId') branchId?: string) {
+    return this.branchesService.getWarehouseStockLevels(branchId);
+  }
+
   @Post('stock-transfers')
   @Permissions('stock_transfers.create')
   @Roles(
@@ -127,7 +139,7 @@ export class BranchesController {
     RoleName.STOCK_ADMIN,
     RoleName.SUPER_ADMIN,
   )
-  @ApiOperation({ summary: 'Transfer product stock from one branch to another' })
+  @ApiOperation({ summary: 'Create stock transfer request' })
   @ApiResponse({ status: 201, description: 'Stock transfer created' })
   createStockTransfer(
     @Body() stockTransferDto: StockTransferDto,
@@ -137,6 +149,42 @@ export class BranchesController {
       stockTransferDto,
       request.user.userId,
     );
+  }
+
+  @Post('stock-transfers/:id/approve')
+  @Permissions('stock_transfers.approve')
+  @Roles(
+    RoleName.ADMIN,
+    RoleName.MANAGER,
+    RoleName.BRANCH_MANAGER,
+    RoleName.STOCK_ADMIN,
+    RoleName.SUPER_ADMIN,
+  )
+  @ApiOperation({ summary: 'Approve stock transfer (deduct from source warehouse)' })
+  approveStockTransfer(
+    @Param('id', new ParseUUIDPipe()) id: string,
+    @Body() dto: ApproveStockTransferDto,
+    @Req() request: AuthenticatedRequest,
+  ) {
+    return this.branchesService.approveStockTransfer(id, request.user.userId, dto.note);
+  }
+
+  @Post('stock-transfers/:id/receive')
+  @Permissions('stock_transfers.receive')
+  @Roles(
+    RoleName.ADMIN,
+    RoleName.MANAGER,
+    RoleName.BRANCH_MANAGER,
+    RoleName.STOCK_ADMIN,
+    RoleName.SUPER_ADMIN,
+  )
+  @ApiOperation({ summary: 'Receive stock transfer (add to destination warehouse)' })
+  receiveStockTransfer(
+    @Param('id', new ParseUUIDPipe()) id: string,
+    @Body() dto: ReceiveStockTransferDto,
+    @Req() request: AuthenticatedRequest,
+  ) {
+    return this.branchesService.receiveStockTransfer(id, request.user.userId, dto.note);
   }
 
   @Get('stock-transfers')

@@ -9,6 +9,7 @@ import { DataSource, In, Repository } from 'typeorm';
 import { DiscountType } from '../common/enums/discount-type.enum';
 import { RequestUser } from '../common/interfaces/request-user.interface';
 import { PosOrder } from '../database/entities/pos-order.entity';
+import { ProductPriceTierEntity } from '../database/entities/product-price-tier.entity';
 import { Product } from '../database/entities/product.entity';
 import { CreateSaleDto } from '../sales/dto/create-sale.dto';
 import { SalesService } from '../sales/sales.service';
@@ -26,6 +27,8 @@ export class PosService {
     private readonly posOrderRepository: Repository<PosOrder>,
     @InjectRepository(Product)
     private readonly productsRepository: Repository<Product>,
+    @InjectRepository(ProductPriceTierEntity)
+    private readonly productPriceTierRepository: Repository<ProductPriceTierEntity>,
     private readonly productsService: ProductsService,
     private readonly salesService: SalesService,
     private readonly dataSource: DataSource,
@@ -232,7 +235,7 @@ export class PosService {
     taxTotal: number;
     grandTotal: number;
   }> {
-    const productIds = dto.items.map((item) => item.productId);
+    const productIds = [...new Set(dto.items.map((item) => item.productId))];
     const products = await this.productsRepository.find({
       where: { id: In(productIds) },
     });
@@ -244,13 +247,54 @@ export class PosService {
       }
     }
 
+    const tierIds = [
+      ...new Set(
+        dto.items
+          .map((item) => item.priceTierId)
+          .filter((priceTierId): priceTierId is string => Boolean(priceTierId)),
+      ),
+    ];
+
+    const tierPrices =
+      tierIds.length === 0
+        ? []
+        : await this.productPriceTierRepository.find({
+            where: {
+              productId: In(productIds),
+              priceTierId: In(tierIds),
+            },
+            relations: {
+              priceTier: true,
+            },
+          });
+    const tierPriceByKey = new Map(
+      tierPrices.map((tierPrice) => [
+        `${tierPrice.productId}:${tierPrice.priceTierId}`,
+        tierPrice,
+      ]),
+    );
+
     const pricing = computePricing({
       items: dto.items.map((item) => {
         const product = productById.get(item.productId)!;
+        let unitPrice = Number(product.price);
+
+        if (item.unitPriceOverride !== undefined) {
+          unitPrice = item.unitPriceOverride;
+        } else if (item.priceTierId) {
+          const tierRow = tierPriceByKey.get(`${item.productId}:${item.priceTierId}`);
+          if (!tierRow || !tierRow.priceTier.isActive) {
+            throw new NotFoundException(
+              `Price tier "${item.priceTierId}" is not configured for product "${product.name}".`,
+            );
+          }
+          unitPrice = Number(tierRow.price);
+        }
+
         return {
           productId: item.productId,
           quantity: item.quantity,
-          unitPrice: Number((item.unitPriceOverride ?? Number(product.price)).toFixed(2)),
+          unitPrice: Number(unitPrice.toFixed(2)),
           lineDiscountType: item.lineDiscountType,
           lineDiscountValue: item.lineDiscountValue,
           taxRate: dto.invoiceTaxRate ?? Number(product.taxRate ?? 0),

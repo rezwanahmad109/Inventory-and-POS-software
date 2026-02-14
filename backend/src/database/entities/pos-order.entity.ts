@@ -16,6 +16,7 @@ export interface PosOrderItem {
   productId: string;
   quantity: number;
   unitPriceOverride?: number;
+  priceTierId?: string;
   lineDiscountType?: DiscountType;
   lineDiscountValue?: number;
 }

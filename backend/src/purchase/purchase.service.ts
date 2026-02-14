@@ -1,21 +1,26 @@
 import {
   BadRequestException,
   Injectable,
+  Logger,
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { DataSource, EntityManager, Repository } from 'typeorm';
+import { EntityManager, Repository } from 'typeorm';
 
 import { BranchesService } from '../branches/branches.service';
 import { PurchaseDocumentType } from '../common/enums/purchase-document-type.enum';
 import { PurchaseStatus } from '../common/enums/purchase-status.enum';
 import { QuotationStatus } from '../common/enums/quotation-status.enum';
 import { RequestUser } from '../common/interfaces/request-user.interface';
+import { AccountingEventBusService } from '../common/services/accounting-event-bus.service';
+import { PartyBalanceService } from '../common/services/party-balance.service';
+import { TransactionRunnerService } from '../common/services/transaction-runner.service';
 import { Product } from '../database/entities/product.entity';
 import { PurchaseItem } from '../database/entities/purchase-item.entity';
 import { PurchasePayment } from '../database/entities/purchase-payment.entity';
 import { Purchase } from '../database/entities/purchase.entity';
 import { Supplier } from '../database/entities/supplier.entity';
+import { NotificationsService } from '../notifications/notifications.service';
 import { ProductsService } from '../products/products.service';
 import { ConvertPurchaseEstimateDto } from './dto/convert-purchase-estimate.dto';
 import { CreatePurchaseDto } from './dto/create-purchase.dto';
@@ -24,12 +29,17 @@ import { UpdatePurchaseDto } from './dto/update-purchase.dto';
 
 @Injectable()
 export class PurchaseService {
+  private readonly logger = new Logger(PurchaseService.name);
+
   constructor(
     @InjectRepository(Purchase)
     private readonly purchaseRepository: Repository<Purchase>,
-    private readonly dataSource: DataSource,
+    private readonly accountingEventBus: AccountingEventBusService,
+    private readonly transactionRunner: TransactionRunnerService,
+    private readonly partyBalanceService: PartyBalanceService,
     private readonly productsService: ProductsService,
     private readonly branchesService: BranchesService,
+    private readonly notificationsService: NotificationsService,
   ) {}
 
   async findAll(): Promise<Purchase[]> {
@@ -54,9 +64,22 @@ export class PurchaseService {
     createPurchaseDto: CreatePurchaseDto,
     requestUser?: RequestUser,
   ): Promise<Purchase> {
-    return this.dataSource.transaction(async (manager) =>
+    const purchase = await this.transactionRunner.runInTransaction(async (manager) =>
       this.persistPurchaseDocument(manager, createPurchaseDto, requestUser),
     );
+    await this.sendPurchaseNotificationIfPossible(purchase);
+    if (purchase.documentType === PurchaseDocumentType.BILL) {
+      this.accountingEventBus.publish('purchase.billed', {
+        purchaseId: purchase.id,
+        invoiceNumber: purchase.invoiceNumber,
+        subtotal: purchase.subtotal,
+        taxTotal: purchase.taxTotal,
+        grandTotal: purchase.grandTotal,
+        branchId: purchase.branchId,
+        occurredAt: purchase.createdAt ?? new Date(),
+      });
+    }
+    return purchase;
   }
 
   async update(
@@ -68,7 +91,7 @@ export class PurchaseService {
       throw new BadRequestException('items are required to update a purchase document.');
     }
 
-    return this.dataSource.transaction(async (manager) => {
+    const purchase = await this.transactionRunner.runInTransaction(async (manager) => {
       const purchase = await this.getPurchaseForMutation(manager, id);
       if (purchase.purchaseReturns.length > 0) {
         throw new BadRequestException(
@@ -87,10 +110,11 @@ export class PurchaseService {
         purchase,
       );
     });
+    return purchase;
   }
 
   async remove(id: string): Promise<void> {
-    await this.dataSource.transaction(async (manager) => {
+    await this.transactionRunner.runInTransaction(async (manager) => {
       const purchase = await this.getPurchaseForMutation(manager, id);
       if (purchase.purchaseReturns.length > 0) {
         throw new BadRequestException(
@@ -108,7 +132,7 @@ export class PurchaseService {
     paymentDto: RecordPurchasePaymentDto,
     requestUser?: RequestUser,
   ): Promise<Purchase> {
-    return this.dataSource.transaction(async (manager) => {
+    const purchase = await this.transactionRunner.runInTransaction(async (manager) => {
       const purchase = await manager.findOne(Purchase, {
         where: { id: purchaseId },
         relations: { payments: true },
@@ -155,6 +179,14 @@ export class PurchaseService {
 
       return this.findOneWithManager(manager, purchase.id);
     });
+
+    this.accountingEventBus.publish('purchase.payment_sent', {
+      purchaseId: purchase.id,
+      amount: paymentDto.amount,
+      branchId: purchase.branchId,
+      occurredAt: new Date(),
+    });
+    return purchase;
   }
 
   async convertEstimateToPurchase(
@@ -162,7 +194,7 @@ export class PurchaseService {
     requestUser: RequestUser,
     convertDto: ConvertPurchaseEstimateDto,
   ): Promise<{ estimate: Purchase; purchase: Purchase }> {
-    return this.dataSource.transaction(async (manager) => {
+    return this.transactionRunner.runInTransaction(async (manager) => {
       const estimate = await manager.findOne(Purchase, {
         where: { id },
         relations: { items: true },
@@ -278,6 +310,10 @@ export class PurchaseService {
     purchase.convertedAt = existingPurchase?.convertedAt ?? null;
     purchase.convertedToPurchaseId = existingPurchase?.convertedToPurchaseId ?? null;
     purchase.notes = dto.notes?.trim() ?? null;
+    purchase.attachments =
+      dto.attachments !== undefined
+        ? dto.attachments
+        : (existingPurchase?.attachments ?? null);
 
     const payments = dto.payments ?? [];
     if (documentType === PurchaseDocumentType.ESTIMATE && payments.length > 0) {
@@ -500,16 +536,11 @@ export class PurchaseService {
     supplierId: string,
     amountDelta: number,
   ): Promise<void> {
-    if (amountDelta === 0) {
-      return;
-    }
-
-    await manager
-      .createQueryBuilder()
-      .update(Supplier)
-      .set({ totalPayable: () => `GREATEST(total_payable + ${amountDelta}, 0)` })
-      .where('id = :id', { id: supplierId })
-      .execute();
+    await this.partyBalanceService.adjustSupplierPayable(
+      manager,
+      supplierId,
+      amountDelta,
+    );
   }
 
   private async generateInvoiceNumber(
@@ -570,5 +601,32 @@ export class PurchaseService {
 
   private roundMoney(value: number): number {
     return Number(value.toFixed(2));
+  }
+
+  private async sendPurchaseNotificationIfPossible(
+    purchase: Purchase,
+  ): Promise<void> {
+    if (purchase.documentType !== PurchaseDocumentType.BILL) {
+      return;
+    }
+
+    const supplier = await this.purchaseRepository.manager.findOne(Supplier, {
+      where: { id: purchase.supplierId },
+    });
+    if (!supplier?.email) {
+      return;
+    }
+
+    try {
+      await this.notificationsService.sendPurchaseOrder(supplier.email, {
+        supplierName: supplier.name,
+        invoiceNumber: purchase.invoiceNumber,
+        grandTotal: purchase.grandTotal,
+      });
+    } catch (error) {
+      this.logger.warn(
+        `Purchase notification failed for purchase ${purchase.id}: ${error instanceof Error ? error.message : 'unknown error'}`,
+      );
+    }
   }
 }

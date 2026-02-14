@@ -1,7 +1,7 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
-import { DataSource } from 'typeorm';
 
+import { TransactionRunnerService } from '../../src/common/services/transaction-runner.service';
 import { WalletTransaction } from '../../src/database/entities/wallet-transaction.entity';
 import { Wallet } from '../../src/database/entities/wallet.entity';
 import { WalletsService } from '../../src/finance/services/wallets.service';
@@ -19,8 +19,8 @@ describe('WalletsService', () => {
     createQueryBuilder: jest.fn(),
   };
 
-  const dataSource = {
-    transaction: jest.fn(),
+  const transactionRunner = {
+    runInTransaction: jest.fn(),
   };
 
   beforeEach(async () => {
@@ -38,14 +38,11 @@ describe('WalletsService', () => {
           useValue: walletTransactionRepository,
         },
         {
-          provide: DataSource,
-          useValue: dataSource,
+          provide: TransactionRunnerService,
+          useValue: transactionRunner,
         },
       ],
-    })
-      .overrideProvider(DataSource)
-      .useValue(dataSource)
-      .compile();
+    }).compile();
 
     service = module.get<WalletsService>(WalletsService);
   });
@@ -74,7 +71,7 @@ describe('WalletsService', () => {
       create: jest.fn().mockImplementation((_entity: any, payload: any) => payload),
     };
 
-    dataSource.transaction.mockImplementation(async (cb: any) => cb(manager));
+    transactionRunner.runInTransaction.mockImplementation(async (cb: any) => cb(manager));
 
     const result = await service.transfer({
       fromWalletId: 'from-wallet',
@@ -110,7 +107,7 @@ describe('WalletsService', () => {
       create: jest.fn(),
     };
 
-    dataSource.transaction.mockImplementation(async (cb: any) => cb(manager));
+    transactionRunner.runInTransaction.mockImplementation(async (cb: any) => cb(manager));
 
     await expect(
       service.transfer({

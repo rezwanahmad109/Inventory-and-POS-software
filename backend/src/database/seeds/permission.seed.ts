@@ -58,9 +58,23 @@ const PERMISSIONS: PermissionDefinition[] = [
   },
   {
     module: 'stock_transfers',
+    action: 'approve',
+    description: 'Approve stock transfer request',
+  },
+  {
+    module: 'stock_transfers',
+    action: 'receive',
+    description: 'Receive approved stock transfer',
+  },
+  {
+    module: 'stock_transfers',
     action: 'read',
     description: 'Read stock transfer history',
   },
+  { module: 'warehouses', action: 'create', description: 'Create warehouse' },
+  { module: 'warehouses', action: 'read', description: 'Read warehouse' },
+  { module: 'warehouses', action: 'update', description: 'Update warehouse' },
+  { module: 'warehouses', action: 'delete', description: 'Delete warehouse' },
   { module: 'customers', action: 'create', description: 'Create customer' },
   { module: 'customers', action: 'read', description: 'Read customer' },
   { module: 'customers', action: 'update', description: 'Update customer' },
@@ -90,6 +104,29 @@ const PERMISSIONS: PermissionDefinition[] = [
   { module: 'reports', action: 'export', description: 'Export reports' },
   { module: 'settings', action: 'read', description: 'Read settings' },
   { module: 'settings', action: 'update', description: 'Update settings' },
+  { module: 'company_settings', action: 'read', description: 'Read company settings' },
+  { module: 'company_settings', action: 'update', description: 'Update company settings' },
+  { module: 'taxes', action: 'create', description: 'Create tax' },
+  { module: 'taxes', action: 'read', description: 'Read tax' },
+  { module: 'taxes', action: 'update', description: 'Update tax' },
+  { module: 'taxes', action: 'delete', description: 'Delete tax' },
+  { module: 'subscription_plans', action: 'create', description: 'Create subscription plan' },
+  { module: 'subscription_plans', action: 'read', description: 'Read subscription plan' },
+  { module: 'subscription_plans', action: 'update', description: 'Update subscription plan' },
+  { module: 'subscription_plans', action: 'delete', description: 'Delete subscription plan' },
+  { module: 'price_tiers', action: 'create', description: 'Create price tier' },
+  { module: 'price_tiers', action: 'read', description: 'Read price tier' },
+  { module: 'price_tiers', action: 'update', description: 'Update price tier and rates' },
+  { module: 'price_tiers', action: 'delete', description: 'Delete price tier' },
+  { module: 'uploads', action: 'create', description: 'Upload attachments' },
+  { module: 'uploads', action: 'read', description: 'Read attachment metadata and signed URLs' },
+  { module: 'uploads', action: 'update', description: 'Link and manage attachments' },
+  { module: 'uploads', action: 'delete', description: 'Delete attachments' },
+  { module: 'notifications', action: 'create', description: 'Create notification templates' },
+  { module: 'notifications', action: 'read', description: 'Read notification templates' },
+  { module: 'notifications', action: 'update', description: 'Update notification templates' },
+  { module: 'notifications', action: 'delete', description: 'Delete notification templates' },
+  { module: 'notifications', action: 'send', description: 'Send notification emails' },
   { module: 'audit_logs', action: 'read', description: 'Read audit logs' },
   { module: 'finance_accounts', action: 'read', description: 'Read chart of accounts' },
   { module: 'finance_accounts', action: 'seed', description: 'Seed chart of accounts' },
@@ -159,6 +196,34 @@ const stockTransferPermissionSlugs = PERMISSIONS.filter(
   (permission) => permission.module === 'stock_transfers',
 ).map((permission) => buildSlug(permission.module, permission.action));
 
+const warehousePermissionSlugs = PERMISSIONS.filter(
+  (permission) => permission.module === 'warehouses',
+).map((permission) => buildSlug(permission.module, permission.action));
+
+const taxPermissionSlugs = PERMISSIONS.filter(
+  (permission) => permission.module === 'taxes',
+).map((permission) => buildSlug(permission.module, permission.action));
+
+const companySettingsPermissionSlugs = PERMISSIONS.filter(
+  (permission) => permission.module === 'company_settings',
+).map((permission) => buildSlug(permission.module, permission.action));
+
+const subscriptionPermissionSlugs = PERMISSIONS.filter(
+  (permission) => permission.module === 'subscription_plans',
+).map((permission) => buildSlug(permission.module, permission.action));
+
+const priceTierPermissionSlugs = PERMISSIONS.filter(
+  (permission) => permission.module === 'price_tiers',
+).map((permission) => buildSlug(permission.module, permission.action));
+
+const uploadPermissionSlugs = PERMISSIONS.filter(
+  (permission) => permission.module === 'uploads',
+).map((permission) => buildSlug(permission.module, permission.action));
+
+const notificationPermissionSlugs = PERMISSIONS.filter(
+  (permission) => permission.module === 'notifications',
+).map((permission) => buildSlug(permission.module, permission.action));
+
 const reportPermissionSlugs = PERMISSIONS.filter(
   (permission) => permission.module === 'reports',
 ).map((permission) => buildSlug(permission.module, permission.action));
@@ -207,6 +272,13 @@ const ROLES: RoleDefinition[] = [
       ...branchPermissionSlugs,
       ...branchProductPermissionSlugs,
       ...stockTransferPermissionSlugs,
+      ...warehousePermissionSlugs,
+      ...taxPermissionSlugs,
+      ...companySettingsPermissionSlugs,
+      ...subscriptionPermissionSlugs,
+      ...priceTierPermissionSlugs,
+      ...uploadPermissionSlugs,
+      ...notificationPermissionSlugs,
       ...reportPermissionSlugs,
       ...financePermissionSlugs,
       ...dashboardPermissionSlugs,
@@ -234,11 +306,20 @@ const ROLES: RoleDefinition[] = [
       'branch_products.read',
       'branch_products.update',
       'stock_transfers.create',
+      'stock_transfers.approve',
+      'stock_transfers.receive',
       'stock_transfers.read',
+      'warehouses.read',
+      'price_tiers.read',
+      'taxes.read',
+      'uploads.create',
+      'uploads.read',
+      'uploads.update',
       'sales.view',
       'reports.view',
       'reports.export',
       'settings.read',
+      'company_settings.read',
       ...auditPermissionSlugs,
     ],
   },
@@ -259,10 +340,19 @@ const ROLES: RoleDefinition[] = [
       'branch_products.read',
       'branch_products.update',
       'stock_transfers.create',
+      'stock_transfers.approve',
+      'stock_transfers.receive',
       'stock_transfers.read',
+      'warehouses.read',
+      'price_tiers.read',
+      'taxes.read',
+      'uploads.create',
+      'uploads.read',
+      'uploads.update',
       'reports.view',
       'reports.export',
       'settings.read',
+      'company_settings.read',
       ...auditPermissionSlugs,
     ],
   },
@@ -282,10 +372,18 @@ const ROLES: RoleDefinition[] = [
       'customers.read',
       'customers.create',
       'branches.read',
+      'warehouses.read',
       'branch_products.read',
       'inventory.view',
       'dashboard.view',
       'settings.read',
+      'company_settings.read',
+      'price_tiers.read',
+      'taxes.read',
+      'uploads.create',
+      'uploads.read',
+      'uploads.update',
+      'notifications.send',
       'finance_invoices.create',
       'finance_invoices.read',
       'finance_payments.create',
@@ -305,10 +403,15 @@ const ROLES: RoleDefinition[] = [
       'reports.view',
       'products.read',
       'branches.read',
+      'warehouses.read',
       'branch_products.read',
       'customers.read',
       'suppliers.read',
       'settings.read',
+      'company_settings.read',
+      'taxes.read',
+      'price_tiers.read',
+      'subscription_plans.read',
     ],
   },
 ];

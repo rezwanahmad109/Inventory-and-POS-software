@@ -14,7 +14,9 @@ import {
 
 import { decimalTransformer } from '../../common/transformers/decimal.transformer';
 import { TaxMethod } from '../../common/enums/tax-method.enum';
+import { BranchEntity } from './branch.entity';
 import { BranchProductEntity } from './branch-product.entity';
+import { ProductPriceTierEntity } from './product-price-tier.entity';
 import { PurchaseItem } from './purchase-item.entity';
 import { PurchaseReturnItem } from './purchase-return-item.entity';
 import { SaleItem } from './sale-item.entity';
@@ -124,6 +126,16 @@ export class Product {
   @Column({ name: 'unit_id' })
   unitId!: string;
 
+  @ManyToOne(() => BranchEntity, {
+    nullable: true,
+    onDelete: 'SET NULL',
+  })
+  @JoinColumn({ name: 'default_warehouse_id' })
+  defaultWarehouse!: BranchEntity | null;
+
+  @Column({ name: 'default_warehouse_id', nullable: true })
+  defaultWarehouseId!: string | null;
+
   @Column({
     type: 'numeric',
     precision: 12,
@@ -179,6 +191,9 @@ export class Product {
 
   @OneToMany(() => StockTransferEntity, (stockTransfer) => stockTransfer.product)
   stockTransfers!: StockTransferEntity[];
+
+  @OneToMany(() => ProductPriceTierEntity, (priceTier) => priceTier.product)
+  productPriceTiers!: ProductPriceTierEntity[];
 
   @CreateDateColumn({ name: 'created_at' })
   createdAt!: Date;

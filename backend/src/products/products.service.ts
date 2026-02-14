@@ -6,24 +6,36 @@ import {
   BadRequestException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { DataSource } from 'typeorm';
 import { In, Repository, SelectQueryBuilder } from 'typeorm';
 
 import { StockAdjustmentReason } from '../common/enums/stock-adjustment-reason.enum';
+import { TransactionRunnerService } from '../common/services/transaction-runner.service';
 import {
   StockLedgerReason,
   StockLedgerRefType,
 } from '../common/enums/stock-ledger.enum';
 import { AuditLog } from '../database/entities/audit-log.entity';
+import { BranchEntity } from '../database/entities/branch.entity';
+import { PriceTierEntity } from '../database/entities/price-tier.entity';
+import { ProductPriceTierEntity } from '../database/entities/product-price-tier.entity';
 import { Category, Product, Unit } from '../database/entities/product.entity';
 import { StockLedgerEntry } from '../database/entities/stock-ledger.entity';
-import { CreateProductDto } from './dto/create-product.dto';
+import {
+  CreateProductDto,
+  ProductPriceTierInputDto,
+} from './dto/create-product.dto';
 import { StockAdjustmentDto } from './dto/stock-adjustment.dto';
 import { UpdateProductDto } from './dto/update-product.dto';
 
 export type ProductView = Product & {
   stockValue: number;
   isLowStock: boolean;
+  rateList: Array<{
+    priceTierId: string;
+    code: string;
+    name: string;
+    price: number;
+  }>;
 };
 
 export interface ProductFilters {
@@ -54,11 +66,17 @@ export class ProductsService {
     private readonly categoriesRepository: Repository<Category>,
     @InjectRepository(Unit)
     private readonly unitsRepository: Repository<Unit>,
+    @InjectRepository(BranchEntity)
+    private readonly branchesRepository: Repository<BranchEntity>,
+    @InjectRepository(PriceTierEntity)
+    private readonly priceTiersRepository: Repository<PriceTierEntity>,
+    @InjectRepository(ProductPriceTierEntity)
+    private readonly productPriceTiersRepository: Repository<ProductPriceTierEntity>,
     @InjectRepository(StockLedgerEntry)
     private readonly stockLedgerRepository: Repository<StockLedgerEntry>,
     @InjectRepository(AuditLog)
     private readonly auditLogRepository: Repository<AuditLog>,
-    private readonly dataSource: DataSource,
+    private readonly transactionRunner: TransactionRunnerService,
   ) {}
 
   async create(createProductDto: CreateProductDto): Promise<ProductView> {
@@ -74,6 +92,9 @@ export class ProductsService {
 
     const category = await this.getCategoryOrFail(createProductDto.categoryId);
     const unit = await this.getUnitOrFail(createProductDto.unitId);
+    const defaultWarehouse = createProductDto.defaultWarehouseId
+      ? await this.getWarehouseOrFail(createProductDto.defaultWarehouseId)
+      : null;
 
     const product = this.productsRepository.create({
       sku,
@@ -88,6 +109,8 @@ export class ProductsService {
       categoryId: category.id,
       unit,
       unitId: unit.id,
+      defaultWarehouse,
+      defaultWarehouseId: defaultWarehouse?.id ?? null,
       price: createProductDto.price,
       taxRate: createProductDto.taxRate ?? null,
       taxMethod: createProductDto.taxMethod,
@@ -98,6 +121,9 @@ export class ProductsService {
     });
 
     const saved = await this.productsRepository.save(product);
+    if (createProductDto.priceTiers && createProductDto.priceTiers.length > 0) {
+      await this.replaceProductPriceTiers(saved.id, createProductDto.priceTiers);
+    }
     return this.findOne(saved.id);
   }
 
@@ -295,6 +321,19 @@ export class ProductsService {
       product.unitId = unit.id;
     }
 
+    if (updateProductDto.defaultWarehouseId !== undefined) {
+      if (updateProductDto.defaultWarehouseId === null) {
+        product.defaultWarehouse = null;
+        product.defaultWarehouseId = null;
+      } else {
+        const warehouse = await this.getWarehouseOrFail(
+          updateProductDto.defaultWarehouseId,
+        );
+        product.defaultWarehouse = warehouse;
+        product.defaultWarehouseId = warehouse.id;
+      }
+    }
+
     if (updateProductDto.name !== undefined) {
       product.name = updateProductDto.name.trim();
     }
@@ -328,6 +367,9 @@ export class ProductsService {
     }
 
     const saved = await this.productsRepository.save(product);
+    if (updateProductDto.priceTiers !== undefined) {
+      await this.replaceProductPriceTiers(saved.id, updateProductDto.priceTiers);
+    }
     this.handleStockLevelChange(saved, previousStockQty, 'manual_update');
     return this.toProductView(saved);
   }
@@ -470,7 +512,7 @@ export class ProductsService {
       throw new BadRequestException('qtyDelta must not be zero.');
     }
 
-    return this.dataSource.transaction(async (manager) => {
+    return this.transactionRunner.runInTransaction(async (manager) => {
       const product = await manager.findOne(Product, {
         where: { id: productId },
         lock: { mode: 'pessimistic_write' },
@@ -638,7 +680,14 @@ export class ProductsService {
   private async findOneEntityOrFail(id: string): Promise<Product> {
     const product = await this.productsRepository.findOne({
       where: { id },
-      relations: { category: true, unit: true },
+      relations: {
+        category: true,
+        unit: true,
+        defaultWarehouse: true,
+        productPriceTiers: {
+          priceTier: true,
+        },
+      },
     });
 
     if (!product) {
@@ -652,7 +701,10 @@ export class ProductsService {
     const query = this.productsRepository
       .createQueryBuilder('product')
       .leftJoinAndSelect('product.category', 'category')
-      .leftJoinAndSelect('product.unit', 'unit');
+      .leftJoinAndSelect('product.unit', 'unit')
+      .leftJoinAndSelect('product.defaultWarehouse', 'defaultWarehouse')
+      .leftJoinAndSelect('product.productPriceTiers', 'productPriceTier')
+      .leftJoinAndSelect('productPriceTier.priceTier', 'priceTier');
 
     if (filters.categoryId) {
       query.andWhere('product.categoryId = :categoryId', {
@@ -673,11 +725,21 @@ export class ProductsService {
     const unitPrice = Number(product.price || 0);
     const stockValue = Number((product.stockQty * unitPrice).toFixed(2));
     const threshold = product.lowStockThreshold ?? 0;
+    const rateList = (product.productPriceTiers ?? [])
+      .filter((item) => item.priceTier?.isActive !== false)
+      .map((item) => ({
+        priceTierId: item.priceTierId,
+        code: item.priceTier?.code ?? '',
+        name: item.priceTier?.name ?? '',
+        price: Number(item.price ?? 0),
+      }))
+      .sort((a, b) => a.name.localeCompare(b.name));
 
     return {
       ...product,
       stockValue,
       isLowStock: threshold > 0 && product.stockQty <= threshold,
+      rateList,
     };
   }
 
@@ -699,6 +761,96 @@ export class ProductsService {
       throw new NotFoundException(`Unit "${unitId}" not found.`);
     }
     return unit;
+  }
+
+  private async getWarehouseOrFail(warehouseId: string): Promise<BranchEntity> {
+    const warehouse = await this.branchesRepository.findOne({
+      where: { id: warehouseId },
+    });
+    if (!warehouse) {
+      throw new NotFoundException(`Warehouse "${warehouseId}" not found.`);
+    }
+    if (!warehouse.isActive) {
+      throw new BadRequestException(
+        `Warehouse "${warehouse.name}" is inactive and cannot be assigned.`,
+      );
+    }
+    return warehouse;
+  }
+
+  private async replaceProductPriceTiers(
+    productId: string,
+    tiers: ProductPriceTierInputDto[],
+  ): Promise<void> {
+    await this.productPriceTiersRepository.delete({ productId });
+    if (tiers.length === 0) {
+      return;
+    }
+
+    const deduped = new Map<string, number>();
+    for (const tier of tiers) {
+      deduped.set(tier.priceTierId, Number(tier.price.toFixed(2)));
+    }
+
+    const tierIds = [...deduped.keys()];
+    const priceTiers = await this.priceTiersRepository.find({
+      where: { id: In(tierIds) },
+    });
+    if (priceTiers.length !== tierIds.length) {
+      const found = new Set(priceTiers.map((tier) => tier.id));
+      const missingId = tierIds.find((tierId) => !found.has(tierId));
+      throw new NotFoundException(`Price tier "${missingId}" not found.`);
+    }
+
+    const entries = tierIds.map((priceTierId) =>
+      this.productPriceTiersRepository.create({
+        productId,
+        priceTierId,
+        price: deduped.get(priceTierId) ?? 0,
+      }),
+    );
+    await this.productPriceTiersRepository.save(entries);
+  }
+
+  async resolvePriceByTier(
+    productId: string,
+    priceTierId?: string,
+  ): Promise<{ unitPrice: number; priceTierId: string | null; priceTierName: string | null }> {
+    const product = await this.productsRepository.findOne({
+      where: { id: productId },
+    });
+    if (!product) {
+      throw new NotFoundException(`Product "${productId}" not found.`);
+    }
+
+    if (!priceTierId) {
+      return {
+        unitPrice: Number(product.price),
+        priceTierId: null,
+        priceTierName: null,
+      };
+    }
+
+    const tierPrice = await this.productPriceTiersRepository.findOne({
+      where: {
+        productId,
+        priceTierId,
+      },
+      relations: {
+        priceTier: true,
+      },
+    });
+    if (!tierPrice || !tierPrice.priceTier.isActive) {
+      throw new NotFoundException(
+        `Price tier "${priceTierId}" is not configured for product "${productId}".`,
+      );
+    }
+
+    return {
+      unitPrice: Number(tierPrice.price),
+      priceTierId: tierPrice.priceTierId,
+      priceTierName: tierPrice.priceTier.name,
+    };
   }
 
   private async ensureUniqueSku(sku: string, ignoreProductId?: string): Promise<void> {

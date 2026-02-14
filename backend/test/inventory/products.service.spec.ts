@@ -11,6 +11,9 @@ describe('ProductsService low-stock threshold boundary', () => {
     {} as Repository<any>,
     {} as Repository<any>,
     {} as Repository<any>,
+    {} as Repository<any>,
+    {} as Repository<any>,
+    {} as Repository<any>,
     {} as any,
   );
 

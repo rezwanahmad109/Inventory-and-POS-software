@@ -12,9 +12,20 @@ import {
   MaxLength,
   Min,
   IsEnum,
+  ValidateNested,
 } from 'class-validator';
 
 import { TaxMethod } from '../../common/enums/tax-method.enum';
+
+export class ProductPriceTierInputDto {
+  @IsUUID()
+  priceTierId!: string;
+
+  @Type(() => Number)
+  @IsNumber({ maxDecimalPlaces: 2 })
+  @Min(0)
+  price!: number;
+}
 
 export class CreateProductDto {
   @ApiProperty({ example: 'Wireless Barcode Scanner' })
@@ -65,6 +76,11 @@ export class CreateProductDto {
   @IsNotEmpty()
   unitId!: string;
 
+  @ApiPropertyOptional({ format: 'uuid' })
+  @IsOptional()
+  @IsUUID()
+  defaultWarehouseId?: string;
+
   @ApiProperty({ example: 49.99 })
   @Type(() => Number)
   @IsNumber({ maxDecimalPlaces: 2 })
@@ -109,4 +125,11 @@ export class CreateProductDto {
   @IsString()
   @MaxLength(4000)
   image?: string;
+
+  @ApiPropertyOptional({ type: [ProductPriceTierInputDto] })
+  @IsOptional()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => ProductPriceTierInputDto)
+  priceTiers?: ProductPriceTierInputDto[];
 }

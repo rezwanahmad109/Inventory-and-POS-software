@@ -29,6 +29,11 @@ export class CreateSaleItemDto {
   @Min(0)
   unitPriceOverride?: number;
 
+  @ApiPropertyOptional({ format: 'uuid' })
+  @IsOptional()
+  @IsUUID()
+  priceTierId?: string;
+
   @ApiPropertyOptional({ enum: DiscountType, default: DiscountType.NONE })
   @IsOptional()
   @IsEnum(DiscountType)

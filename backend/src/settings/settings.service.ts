@@ -75,8 +75,13 @@ export class SettingsService implements OnModuleInit {
     if (dto.taxRate !== undefined) settings.taxRate = dto.taxRate;
     if (dto.currency !== undefined) settings.currency = dto.currency;
     if (dto.logoUrl !== undefined) settings.logoUrl = dto.logoUrl;
+    if (dto.secondaryLogoUrl !== undefined) {
+      settings.secondaryLogoUrl = dto.secondaryLogoUrl;
+    }
     if (dto.businessName !== undefined) settings.businessName = dto.businessName;
     if (dto.footerNote !== undefined) settings.footerNote = dto.footerNote;
+    if (dto.theme !== undefined) settings.theme = dto.theme.trim();
+    if (dto.timeZone !== undefined) settings.timeZone = dto.timeZone.trim();
 
     if (dto.businessProfile) {
       settings.businessProfile = this.mergeBusinessProfile(
@@ -363,7 +368,10 @@ export class SettingsService implements OnModuleInit {
       currency: 'USD',
       businessName: 'My Business',
       logoUrl: null,
+      secondaryLogoUrl: null,
       footerNote: null,
+      theme: 'default',
+      timeZone: 'UTC',
       businessProfile: null,
       invoiceTemplate: null,
       taxSettings: null,

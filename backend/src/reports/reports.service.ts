@@ -246,7 +246,13 @@ export class ReportsService {
     this.ensureValidRange(query.from, query.to);
 
     const rows = await this.productRepository.find({
-      relations: { category: true, unit: true },
+      relations: {
+        category: true,
+        unit: true,
+        productPriceTiers: {
+          priceTier: true,
+        },
+      },
       order: { name: 'ASC' },
     });
 
@@ -259,6 +265,12 @@ export class ReportsService {
       taxRate: product.taxRate,
       unit: product.unit?.symbol ?? null,
       category: product.category?.name ?? null,
+      rateList: (product.productPriceTiers ?? []).map((row) => ({
+        priceTierId: row.priceTierId,
+        code: row.priceTier?.code ?? null,
+        name: row.priceTier?.name ?? null,
+        price: Number(row.price),
+      })),
     }));
 
     return this.maybeExport('rate_list', result, query.format);

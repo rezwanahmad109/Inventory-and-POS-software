@@ -1,23 +1,29 @@
 import {
   BadRequestException,
   Injectable,
+  Logger,
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { DataSource, EntityManager, Repository } from 'typeorm';
+import { EntityManager, Repository } from 'typeorm';
 
 import { BranchesService } from '../branches/branches.service';
 import { RequestUser } from '../common/interfaces/request-user.interface';
+import { AccountingEventBusService } from '../common/services/accounting-event-bus.service';
+import { PartyBalanceService } from '../common/services/party-balance.service';
+import { TransactionRunnerService } from '../common/services/transaction-runner.service';
 import { QuotationStatus } from '../common/enums/quotation-status.enum';
 import { SaleDocumentType } from '../common/enums/sale-document-type.enum';
 import { SaleStatus } from '../common/enums/sale-status.enum';
 import { TaxMethod } from '../common/enums/tax-method.enum';
 import { Customer } from '../database/entities/customer.entity';
+import { ProductPriceTierEntity } from '../database/entities/product-price-tier.entity';
 import { Product } from '../database/entities/product.entity';
 import { SaleItem } from '../database/entities/sale-item.entity';
 import { SalePayment } from '../database/entities/sale-payment.entity';
 import { Sale } from '../database/entities/sale.entity';
 import { ProductsService } from '../products/products.service';
+import { NotificationsService } from '../notifications/notifications.service';
 import { computePricing } from './pricing/pricing-engine';
 import { ConvertSaleQuotationDto } from './dto/convert-sale-quotation.dto';
 import { CreateSaleDto } from './dto/create-sale.dto';
@@ -26,23 +32,46 @@ import { UpdateSaleDto } from './dto/update-sale.dto';
 
 @Injectable()
 export class SalesService {
+  private readonly logger = new Logger(SalesService.name);
+
   constructor(
     @InjectRepository(Sale)
     private readonly salesRepository: Repository<Sale>,
     @InjectRepository(SalePayment)
     private readonly salePaymentsRepository: Repository<SalePayment>,
-    private readonly dataSource: DataSource,
+    private readonly accountingEventBus: AccountingEventBusService,
+    private readonly transactionRunner: TransactionRunnerService,
+    private readonly partyBalanceService: PartyBalanceService,
     private readonly productsService: ProductsService,
     private readonly branchesService: BranchesService,
+    private readonly notificationsService: NotificationsService,
   ) {}
 
   async createInvoice(
     createSaleDto: CreateSaleDto,
     requestUser: RequestUser,
   ): Promise<Sale> {
-    return this.dataSource.transaction(async (manager) =>
+    const sale = await this.transactionRunner.runInTransaction(async (manager) =>
       this.persistSaleDocument(manager, createSaleDto, requestUser),
     );
+
+    await this.sendOrderConfirmationIfPossible(sale);
+    if (sale.dueTotal <= 0) {
+      await this.sendReceiptIfPossible(sale);
+    }
+
+    if (sale.documentType === SaleDocumentType.INVOICE) {
+      this.accountingEventBus.publish('sale.invoiced', {
+        saleId: sale.id,
+        invoiceNumber: sale.invoiceNumber,
+        subtotal: sale.subtotal,
+        taxTotal: sale.taxTotal,
+        grandTotal: sale.grandTotal,
+        branchId: sale.branchId,
+        occurredAt: sale.createdAt ?? new Date(),
+      });
+    }
+    return sale;
   }
 
   async updateInvoice(
@@ -54,7 +83,7 @@ export class SalesService {
       throw new BadRequestException('items are required to update a sale invoice.');
     }
 
-    return this.dataSource.transaction(async (manager) => {
+    return this.transactionRunner.runInTransaction(async (manager) => {
       const sale = await this.getSaleForMutation(manager, id);
       if (sale.salesReturns.length > 0) {
         throw new BadRequestException(
@@ -76,7 +105,7 @@ export class SalesService {
   }
 
   async removeInvoice(id: string): Promise<void> {
-    await this.dataSource.transaction(async (manager) => {
+    await this.transactionRunner.runInTransaction(async (manager) => {
       const sale = await this.getSaleForMutation(manager, id);
 
       if (sale.salesReturns.length > 0) {
@@ -95,7 +124,7 @@ export class SalesService {
     paymentDto: RecordSalePaymentDto,
     requestUser: RequestUser,
   ): Promise<Sale> {
-    return this.dataSource.transaction(async (manager) => {
+    const sale = await this.transactionRunner.runInTransaction(async (manager) => {
       const sale = await manager.findOne(Sale, {
         where: { id: saleId },
         lock: { mode: 'pessimistic_write' },
@@ -148,6 +177,18 @@ export class SalesService {
 
       return this.findOneWithManager(manager, sale.id);
     });
+
+    if (sale.dueTotal <= 0) {
+      await this.sendReceiptIfPossible(sale);
+    }
+
+    this.accountingEventBus.publish('sale.payment_received', {
+      saleId: sale.id,
+      amount: paymentDto.amount,
+      branchId: sale.branchId,
+      occurredAt: new Date(),
+    });
+    return sale;
   }
 
   async convertQuotationToSale(
@@ -155,7 +196,7 @@ export class SalesService {
     requestUser: RequestUser,
     convertDto: ConvertSaleQuotationDto,
   ): Promise<{ quotation: Sale; sale: Sale }> {
-    return this.dataSource.transaction(async (manager) => {
+    return this.transactionRunner.runInTransaction(async (manager) => {
       const quotation = await manager.findOne(Sale, {
         where: { id },
         relations: { items: true, payments: true },
@@ -290,6 +331,10 @@ export class SalesService {
     }
 
     const productsById = new Map<string, Product>();
+    const linePriceTierMeta: Array<{
+      priceTierId: string | null;
+      priceTierName: string | null;
+    }> = [];
     const pricingInput: Array<{
       productId: string;
       quantity: number;
@@ -320,9 +365,34 @@ export class SalesService {
         );
       }
 
-      const unitPrice = Number(
-        (item.unitPriceOverride ?? Number(product.price)).toFixed(2),
-      );
+      let resolvedPriceTierId: string | null = null;
+      let resolvedPriceTierName: string | null = null;
+      let unitPrice = Number(product.price);
+
+      if (item.unitPriceOverride !== undefined) {
+        unitPrice = Number(item.unitPriceOverride);
+      } else if (item.priceTierId) {
+        const tierPrice = await manager.findOne(ProductPriceTierEntity, {
+          where: {
+            productId: product.id,
+            priceTierId: item.priceTierId,
+          },
+          relations: {
+            priceTier: true,
+          },
+        });
+        if (!tierPrice || !tierPrice.priceTier.isActive) {
+          throw new NotFoundException(
+            `Price tier "${item.priceTierId}" is not configured for product "${product.name}".`,
+          );
+        }
+
+        resolvedPriceTierId = tierPrice.priceTierId;
+        resolvedPriceTierName = tierPrice.priceTier.name;
+        unitPrice = Number(tierPrice.price);
+      }
+
+      unitPrice = Number(unitPrice.toFixed(2));
       pricingInput.push({
         productId: product.id,
         quantity: item.quantity,
@@ -333,6 +403,10 @@ export class SalesService {
         taxMethod: product.taxMethod,
       });
       productsById.set(product.id, product);
+      linePriceTierMeta.push({
+        priceTierId: resolvedPriceTierId,
+        priceTierName: resolvedPriceTierName,
+      });
     }
 
     const pricing = computePricing({
@@ -401,6 +475,10 @@ export class SalesService {
     sale.legacyPaymentMethod = null;
     sale.branchId = branchId;
     sale.notes = createSaleDto.notes?.trim() ?? null;
+    sale.attachments =
+      createSaleDto.attachments !== undefined
+        ? createSaleDto.attachments
+        : (existingSale?.attachments ?? null);
 
     sale.quotationStatus =
       documentType === SaleDocumentType.QUOTATION
@@ -413,11 +491,16 @@ export class SalesService {
     const persistedSale = await manager.save(Sale, sale);
 
     const persistedItems: SaleItem[] = [];
-    for (const line of pricing.lines) {
+    for (let index = 0; index < pricing.lines.length; index += 1) {
+      const line = pricing.lines[index];
       const product = productsById.get(line.productId);
       if (!product) {
         throw new NotFoundException(`Product "${line.productId}" not found.`);
       }
+      const tierMeta = linePriceTierMeta[index] ?? {
+        priceTierId: null,
+        priceTierName: null,
+      };
 
       if (documentType === SaleDocumentType.INVOICE) {
         if (branchId) {
@@ -441,6 +524,8 @@ export class SalesService {
         productId: product.id,
         quantity: line.quantity,
         unitPrice: line.unitPrice,
+        priceTierId: tierMeta.priceTierId,
+        priceTierName: tierMeta.priceTierName,
         lineDiscountType: line.lineDiscountType,
         lineDiscountValue: line.lineDiscountValue,
         lineDiscountAmount: line.lineDiscountAmount,
@@ -505,16 +590,11 @@ export class SalesService {
     customerId: number,
     amountDelta: number,
   ): Promise<void> {
-    if (amountDelta === 0) {
-      return;
-    }
-
-    await manager
-      .createQueryBuilder()
-      .update(Customer)
-      .set({ totalDue: () => `GREATEST(total_due + ${amountDelta}, 0)` })
-      .where('id = :id', { id: customerId })
-      .execute();
+    await this.partyBalanceService.adjustCustomerDue(
+      manager,
+      customerId,
+      amountDelta,
+    );
   }
 
   private async getSaleForMutation(
@@ -637,5 +717,55 @@ export class SalesService {
 
   private roundMoney(value: number): number {
     return Number(value.toFixed(2));
+  }
+
+  private async sendOrderConfirmationIfPossible(sale: Sale): Promise<void> {
+    if (sale.documentType !== SaleDocumentType.INVOICE || !sale.customerId) {
+      return;
+    }
+
+    const customer = await this.salesRepository.manager.findOne(Customer, {
+      where: { id: sale.customerId },
+    });
+    if (!customer?.email) {
+      return;
+    }
+
+    try {
+      await this.notificationsService.sendOrderConfirmation(customer.email, {
+        customerName: customer.name,
+        invoiceNumber: sale.invoiceNumber,
+        grandTotal: sale.grandTotal,
+      });
+    } catch (error) {
+      this.logger.warn(
+        `Order confirmation email failed for sale ${sale.id}: ${error instanceof Error ? error.message : 'unknown error'}`,
+      );
+    }
+  }
+
+  private async sendReceiptIfPossible(sale: Sale): Promise<void> {
+    if (!sale.customerId) {
+      return;
+    }
+    const customer = await this.salesRepository.manager.findOne(Customer, {
+      where: { id: sale.customerId },
+    });
+    if (!customer?.email) {
+      return;
+    }
+
+    try {
+      await this.notificationsService.sendReceipt(customer.email, {
+        customerName: customer.name,
+        invoiceNumber: sale.invoiceNumber,
+        paidTotal: sale.paidTotal,
+        dueTotal: sale.dueTotal,
+      });
+    } catch (error) {
+      this.logger.warn(
+        `Receipt email failed for sale ${sale.id}: ${error instanceof Error ? error.message : 'unknown error'}`,
+      );
+    }
   }
 }

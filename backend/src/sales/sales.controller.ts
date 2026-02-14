@@ -8,6 +8,7 @@ import {
   ParseUUIDPipe,
   Param,
   Post,
+  Res,
   Put,
   Req,
   UseGuards,
@@ -19,6 +20,7 @@ import {
   ApiTags,
 } from '@nestjs/swagger';
 import { Request } from 'express';
+import { Response } from 'express';
 
 import { Permissions } from '../common/decorators/permissions.decorator';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
@@ -28,6 +30,7 @@ import { ConvertSaleQuotationDto } from './dto/convert-sale-quotation.dto';
 import { CreateSaleDto } from './dto/create-sale.dto';
 import { RecordSalePaymentDto } from './dto/record-sale-payment.dto';
 import { UpdateSaleDto } from './dto/update-sale.dto';
+import { SalesPdfService } from './sales-pdf.service';
 import { SalesService } from './sales.service';
 
 interface AuthenticatedRequest extends Request {
@@ -39,7 +42,10 @@ interface AuthenticatedRequest extends Request {
 @UseGuards(JwtAuthGuard, RolesGuard)
 @Controller('sales')
 export class SalesController {
-  constructor(private readonly salesService: SalesService) {}
+  constructor(
+    private readonly salesService: SalesService,
+    private readonly salesPdfService: SalesPdfService,
+  ) {}
 
   @Post()
   @Permissions('sales.create')
@@ -108,5 +114,21 @@ export class SalesController {
     @Req() request: AuthenticatedRequest,
   ) {
     return this.salesService.convertQuotationToSale(id, request.user, convertDto);
+  }
+
+  @Get(':id/pdf')
+  @Permissions('sales.view')
+  @ApiOperation({ summary: 'Generate invoice PDF with company branding and barcode/QR payload' })
+  async getInvoicePdf(
+    @Param('id', new ParseUUIDPipe()) id: string,
+    @Res() response: Response,
+  ) {
+    const { sale, pdf } = await this.salesPdfService.generateInvoicePdf(id);
+    response.setHeader('Content-Type', 'application/pdf');
+    response.setHeader(
+      'Content-Disposition',
+      `attachment; filename="${sale.invoiceNumber}.pdf"`,
+    );
+    response.status(200).send(pdf);
   }
 }

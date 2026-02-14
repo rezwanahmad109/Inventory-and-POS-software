@@ -4,10 +4,13 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { DataSource, EntityManager, Repository } from 'typeorm';
+import { EntityManager, Repository } from 'typeorm';
 
 import { BranchesService } from '../branches/branches.service';
 import { PurchaseStatus } from '../common/enums/purchase-status.enum';
+import { AccountingEventBusService } from '../common/services/accounting-event-bus.service';
+import { PartyBalanceService } from '../common/services/party-balance.service';
+import { TransactionRunnerService } from '../common/services/transaction-runner.service';
 import { Product } from '../database/entities/product.entity';
 import { PurchaseReturn } from '../database/entities/purchase-return.entity';
 import { PurchaseReturnItem } from '../database/entities/purchase-return-item.entity';
@@ -25,8 +28,10 @@ export class PurchaseReturnService {
   constructor(
     @InjectRepository(PurchaseReturn)
     private readonly purchaseReturnRepository: Repository<PurchaseReturn>,
-    private readonly dataSource: DataSource,
+    private readonly accountingEventBus: AccountingEventBusService,
+    private readonly transactionRunner: TransactionRunnerService,
     private readonly branchesService: BranchesService,
+    private readonly partyBalanceService: PartyBalanceService,
   ) {}
 
   /**
@@ -41,7 +46,7 @@ export class PurchaseReturnService {
     createPurchaseReturnDto: CreatePurchaseReturnDto,
     actorUserId?: string,
   ): Promise<PurchaseReturn> {
-    return this.dataSource.transaction(async (manager) => {
+    const purchaseReturn = await this.transactionRunner.runInTransaction(async (manager) => {
       // Validate original purchase exists
       const originalPurchase = await manager.findOne(Purchase, {
         where: { id: createPurchaseReturnDto.originalPurchaseId },
@@ -189,6 +194,14 @@ export class PurchaseReturnService {
       createdReturn.returnedItems = persistedItems;
       return createdReturn;
     });
+
+    this.accountingEventBus.publish('purchase_return.created', {
+      purchaseReturnId: purchaseReturn.id,
+      totalRefund: purchaseReturn.totalRefund,
+      branchId: purchaseReturn.originalPurchase?.branchId ?? null,
+      occurredAt: purchaseReturn.returnDate ?? new Date(),
+    });
+    return purchaseReturn;
   }
 
   /**
@@ -224,16 +237,11 @@ export class PurchaseReturnService {
     supplierId: string,
     amountDelta: number,
   ): Promise<void> {
-    if (amountDelta === 0) {
-      return;
-    }
-
-    await manager
-      .createQueryBuilder()
-      .update(Supplier)
-      .set({ totalPayable: () => `GREATEST(total_payable + ${amountDelta}, 0)` })
-      .where('id = :id', { id: supplierId })
-      .execute();
+    await this.partyBalanceService.adjustSupplierPayable(
+      manager,
+      supplierId,
+      amountDelta,
+    );
   }
 
   private resolvePurchaseStatus(

@@ -4,9 +4,10 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { DataSource, Repository } from 'typeorm';
+import { Repository } from 'typeorm';
 
 import { RequestUser } from '../common/interfaces/request-user.interface';
+import { TransactionRunnerService } from '../common/services/transaction-runner.service';
 import { Expense } from '../database/entities/expense.entity';
 import { WalletTransaction } from '../database/entities/wallet-transaction.entity';
 import { Wallet } from '../database/entities/wallet.entity';
@@ -23,7 +24,7 @@ export class CashflowService {
     private readonly purchaseService: PurchaseService,
     @InjectRepository(Expense)
     private readonly expensesRepository: Repository<Expense>,
-    private readonly dataSource: DataSource,
+    private readonly transactionRunner: TransactionRunnerService,
   ) {}
 
   async recordIncomingSalePayment(
@@ -122,7 +123,7 @@ export class CashflowService {
       throw new BadRequestException('Amount must be greater than zero.');
     }
 
-    return this.dataSource.transaction(async (manager) => {
+    return this.transactionRunner.runInTransaction(async (manager) => {
       const wallet = await manager.findOne(Wallet, {
         where: { id: walletId },
         lock: { mode: 'pessimistic_write' },

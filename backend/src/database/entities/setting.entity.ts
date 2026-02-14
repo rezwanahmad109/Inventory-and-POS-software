@@ -92,6 +92,15 @@ export class Setting {
   @Column({ name: 'logo_url', type: 'text', nullable: true })
   logoUrl!: string | null;
 
+  @Column({ name: 'secondary_logo_url', type: 'text', nullable: true })
+  secondaryLogoUrl!: string | null;
+
+  @Column({ length: 40, default: 'default' })
+  theme!: string;
+
+  @Column({ name: 'time_zone', length: 80, default: 'UTC' })
+  timeZone!: string;
+
   @Column({ name: 'business_name', length: 255 })
   businessName!: string;
 

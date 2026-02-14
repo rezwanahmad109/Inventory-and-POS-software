@@ -20,6 +20,11 @@ export class PosOrderItemDto {
   @Min(0)
   unitPriceOverride?: number;
 
+  @ApiPropertyOptional({ format: 'uuid' })
+  @IsOptional()
+  @IsUUID('4')
+  priceTierId?: string;
+
   @ApiPropertyOptional({ enum: DiscountType })
   @IsOptional()
   @IsEnum(DiscountType)

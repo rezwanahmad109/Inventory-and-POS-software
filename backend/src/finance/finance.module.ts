@@ -24,6 +24,7 @@ import { FinanceInvoicesService } from './services/finance-invoices.service';
 import { FinancePaymentsService } from './services/finance-payments.service';
 import { FinanceReportsService } from './services/finance-reports.service';
 import { JournalPostingService } from './services/journal-posting.service';
+import { OperationalLedgerListener } from './services/operational-ledger.listener';
 import { ReconcileService } from './services/reconcile.service';
 import { WalletsService } from './services/wallets.service';
 
@@ -61,6 +62,7 @@ import { WalletsService } from './services/wallets.service';
     WalletsService,
     ReconcileService,
     FinanceReportsService,
+    OperationalLedgerListener,
   ],
 })
 export class FinanceModule {}
