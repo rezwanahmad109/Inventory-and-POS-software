@@ -6,6 +6,8 @@ import {
   Param,
   ParseUUIDPipe,
   Post,
+  UsePipes,
+  ValidationPipe,
   Put,
   UseGuards,
 } from '@nestjs/common';
@@ -20,6 +22,13 @@ import { NotificationsService } from './notifications.service';
 
 @Controller('notifications')
 @UseGuards(JwtAuthGuard, RolesGuard)
+@UsePipes(
+  new ValidationPipe({
+    whitelist: true,
+    forbidNonWhitelisted: true,
+    transform: true,
+  }),
+)
 export class NotificationsController {
   constructor(private readonly notificationsService: NotificationsService) {}
 

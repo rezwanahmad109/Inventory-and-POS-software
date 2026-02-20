@@ -5,6 +5,8 @@ import {
   HttpStatus,
   Post,
   Req,
+  UsePipes,
+  ValidationPipe,
   UseGuards,
 } from '@nestjs/common';
 import {
@@ -27,6 +29,13 @@ interface AuthenticatedRequest extends Request {
 
 @ApiTags('Auth')
 @Controller('auth')
+@UsePipes(
+  new ValidationPipe({
+    whitelist: true,
+    forbidNonWhitelisted: true,
+    transform: true,
+  }),
+)
 export class AuthController {
   constructor(private readonly authService: AuthService) {}
 
@@ -46,6 +55,15 @@ export class AuthController {
   @ApiResponse({ status: 401, description: 'Invalid refresh token' })
   async refresh(@Body() refreshTokenDto: RefreshTokenDto) {
     return this.authService.refresh(refreshTokenDto);
+  }
+
+  @Post('revoke')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Revoke a refresh token immediately' })
+  @ApiResponse({ status: 200, description: 'Token revoked successfully' })
+  @ApiResponse({ status: 401, description: 'Invalid refresh token' })
+  async revoke(@Body() refreshTokenDto: RefreshTokenDto) {
+    return this.authService.revoke(refreshTokenDto);
   }
 
   @Post('logout')

@@ -1,0 +1,74 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+
+jobs:
+  quality:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Install backend dependencies
+        working-directory: backend
+        run: npm ci
+
+      - name: Lint backend
+        working-directory: backend
+        run: npm run lint
+
+      - name: Run backend tests
+        working-directory: backend
+        run: npm run test -- --runInBand
+
+      - name: Build backend
+        working-directory: backend
+        run: npm run build
+
+      - name: Audit backend production dependencies
+        working-directory: backend
+        run: npm audit --production
+
+      - name: Install Flutter dependencies
+        run: |
+          if [ -f pubspec.yaml ]; then
+            flutter pub get
+          else
+            echo "No pubspec.yaml found at repository root. Skipping Flutter dependency install."
+          fi
+
+      - name: Run Flutter tests
+        run: |
+          if [ -f pubspec.yaml ]; then
+            flutter test
+          else
+            echo "No pubspec.yaml found at repository root. Skipping Flutter tests."
+          fi
+
+      - name: Build Flutter web
+        run: |
+          if [ -f pubspec.yaml ]; then
+            flutter build web --release --dart-define=API_BASE_URL=/api
+          else
+            echo "No pubspec.yaml found at repository root. Skipping Flutter web build."
+          fi
+
+      - name: Build production Docker images (optional)
+        run: docker compose -f docker-compose.prod.yml build || true

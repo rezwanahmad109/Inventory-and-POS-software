@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
+import 'package:flutter_dotenv/flutter_dotenv.dart';
+import 'package:hive_flutter/hive_flutter.dart';
 
 import 'app_config.dart';
 import 'app_routes.dart';
@@ -17,8 +19,14 @@ import 'screens/purchase_return_screen.dart';
 import 'screens/sales_history_screen.dart';
 import 'screens/sales_return_screen.dart';
 
-void main() {
+Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  await Hive.initFlutter();
+  try {
+    await dotenv.load(fileName: '.env');
+  } catch (_) {
+    // Fallback to compile-time --dart-define values when .env is absent.
+  }
   runApp(const InventoryPosApp());
 }
 
@@ -224,10 +232,14 @@ class _LoginPageState extends State<LoginPage> {
         throw const ApiException(500, 'Unexpected login response format.');
       }
 
-      final String? token = response['accessToken']?.toString();
+      final String? accessToken = response['accessToken']?.toString();
+      final String? refreshToken = response['refreshToken']?.toString();
       final dynamic userPayload = response['user'];
-      if (token == null || userPayload is! Map<String, dynamic>) {
-        throw const ApiException(500, 'Missing token or user payload.');
+      if (
+          accessToken == null ||
+          refreshToken == null ||
+          userPayload is! Map<String, dynamic>) {
+        throw const ApiException(500, 'Missing token pair or user payload.');
       }
 
       final String userId = userPayload['id']?.toString() ?? '';
@@ -243,7 +255,10 @@ class _LoginPageState extends State<LoginPage> {
               .map((dynamic permission) => permission.toString())
               .toList(growable: false);
 
-      widget.apiClient.token = token;
+      await widget.apiClient.setSession(
+        accessToken: accessToken,
+        refreshToken: refreshToken,
+      );
       context.read<AuthBloc>().add(
         AuthSessionSet(
           userId: userId,

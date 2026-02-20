@@ -12,6 +12,8 @@ import {
   Res,
   Put,
   Req,
+  UsePipes,
+  ValidationPipe,
   UseGuards,
 } from '@nestjs/common';
 import {
@@ -43,6 +45,13 @@ interface AuthenticatedRequest extends Request {
 @ApiBearerAuth()
 @UseGuards(JwtAuthGuard, RolesGuard)
 @Controller('sales')
+@UsePipes(
+  new ValidationPipe({
+    whitelist: true,
+    forbidNonWhitelisted: true,
+    transform: true,
+  }),
+)
 export class SalesController {
   constructor(
     private readonly salesService: SalesService,

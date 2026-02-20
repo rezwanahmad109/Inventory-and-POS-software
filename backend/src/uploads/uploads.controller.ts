@@ -11,6 +11,8 @@ import {
   UploadedFile,
   UseGuards,
   UseInterceptors,
+  UsePipes,
+  ValidationPipe,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { Request, Response } from 'express';
@@ -29,6 +31,13 @@ interface AuthenticatedRequest extends Request {
 }
 
 @Controller('uploads')
+@UsePipes(
+  new ValidationPipe({
+    whitelist: true,
+    forbidNonWhitelisted: true,
+    transform: true,
+  }),
+)
 export class UploadsController {
   constructor(private readonly uploadsService: UploadsService) {}
 

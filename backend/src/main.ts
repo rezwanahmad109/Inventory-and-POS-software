@@ -7,9 +7,10 @@ import helmet from 'helmet';
 import { join } from 'path';
 
 import { AppModule } from './app.module';
-import { ApiExceptionFilter } from './common/filters/api-exception.filter';
+import { HttpExceptionFilter } from './common/filters/http-exception.filter';
 import { RequestLoggingInterceptor } from './common/interceptors/request-logging.interceptor';
 import { ResponseEnvelopeInterceptor } from './common/interceptors/response-envelope.interceptor';
+import { AppLoggerService } from './common/services/logger.service';
 
 function parseAllowedOrigins(rawValue: string): string[] {
   return rawValue
@@ -23,12 +24,14 @@ async function bootstrap(): Promise<void> {
     cors: false,
   });
   const configService = app.get(ConfigService);
+  const logger = app.get(AppLoggerService);
+  app.useLogger(logger);
 
   app.set('trust proxy', 1);
   app.use(helmet());
 
   const allowedOrigins = parseAllowedOrigins(
-    configService.get<string>('CORS_ORIGINS', '*'),
+    configService.getOrThrow<string>('CORS_ORIGINS'),
   );
 
   app.enableCors({
@@ -53,9 +56,9 @@ async function bootstrap(): Promise<void> {
       transformOptions: { enableImplicitConversion: true },
     }),
   );
-  app.useGlobalFilters(new ApiExceptionFilter());
+  app.useGlobalFilters(new HttpExceptionFilter(logger));
   app.useGlobalInterceptors(
-    new RequestLoggingInterceptor(),
+    new RequestLoggingInterceptor(logger),
     new ResponseEnvelopeInterceptor(),
   );
 
@@ -73,7 +76,7 @@ async function bootstrap(): Promise<void> {
     prefix: '/downloads/',
   });
 
-  const port = Number(configService.get<string>('PORT', '3000'));
+  const port = Number(configService.getOrThrow<string>('PORT'));
   await app.listen(port);
 }
 

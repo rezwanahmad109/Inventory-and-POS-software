@@ -11,6 +11,8 @@ import {
   Post,
   Put,
   Req,
+  UsePipes,
+  ValidationPipe,
   UseGuards,
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
@@ -34,6 +36,13 @@ interface AuthenticatedRequest extends Request {
 @ApiBearerAuth()
 @Controller()
 @UseGuards(JwtAuthGuard, RolesGuard)
+@UsePipes(
+  new ValidationPipe({
+    whitelist: true,
+    forbidNonWhitelisted: true,
+    transform: true,
+  }),
+)
 export class UsersController {
   constructor(private readonly usersService: UsersService) {}
 

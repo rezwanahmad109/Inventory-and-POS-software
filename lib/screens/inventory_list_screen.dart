@@ -5,6 +5,7 @@ import 'package:flutter_bloc/flutter_bloc.dart';
 
 import '../app_routes.dart';
 import '../core/api/api_client.dart';
+import '../core/cache/product_cache_service.dart';
 import '../features/auth/bloc/auth_bloc.dart';
 import '../features/auth/bloc/auth_state.dart';
 
@@ -668,6 +669,18 @@ class Product {
 
   bool get isLowStock => lowStockThreshold > 0 && stockQty <= lowStockThreshold;
 
+  Map<String, dynamic> toJson() {
+    return <String, dynamic>{
+      'id': id,
+      'sku': sku,
+      'name': name,
+      'category': category,
+      'unitPrice': unitPrice,
+      'stockQty': stockQty,
+      'lowStockThreshold': lowStockThreshold,
+    };
+  }
+
   factory Product.fromJson(Map<String, dynamic> json) {
     final num thresholdRaw =
         (json['lowStockThreshold'] as num?) ??
@@ -697,31 +710,58 @@ class Product {
 }
 
 class InventoryApiService {
-  InventoryApiService({required ApiClient apiClient}) : _apiClient = apiClient;
+  InventoryApiService({required ApiClient apiClient})
+    : _apiClient = apiClient,
+      _cacheService = ProductCacheService();
 
   final ApiClient _apiClient;
+  final ProductCacheService _cacheService;
 
   Future<List<Product>> fetchProducts({String query = ''}) async {
-    dynamic payload;
-    if (query.isEmpty) {
-      payload = await _apiClient.get(
-        'products',
-        query: const <String, String>{'page': '1', 'limit': '100'},
-      );
-    } else {
-      payload = await _apiClient.get(
-        'products/search',
-        query: <String, String>{'q': query, 'limit': '100'},
-      );
-    }
+    try {
+      dynamic payload;
+      if (query.isEmpty) {
+        payload = await _apiClient.get(
+          'products',
+          query: const <String, String>{'page': '1', 'limit': '100'},
+        );
+      } else {
+        payload = await _apiClient.get(
+          'products/search',
+          query: <String, String>{'q': query, 'limit': '100'},
+        );
+      }
 
-    if (payload is List<dynamic>) {
-      return _asProductList(payload);
-    }
-    if (payload is Map<String, dynamic>) {
-      final dynamic collection = payload['items'] ?? payload['data'];
-      if (collection is List<dynamic>) {
-        return _asProductList(collection);
+      if (payload is List<dynamic>) {
+        final List<Product> products = _asProductList(payload);
+        if (query.isEmpty) {
+          await _cacheService.cacheProducts(
+            products.map((Product product) => product.toJson()).toList(),
+          );
+        }
+        return products;
+      }
+      if (payload is Map<String, dynamic>) {
+        final dynamic collection = payload['items'] ?? payload['data'];
+        if (collection is List<dynamic>) {
+          final List<Product> products = _asProductList(collection);
+          if (query.isEmpty) {
+            await _cacheService.cacheProducts(
+              products.map((Product product) => product.toJson()).toList(),
+            );
+          }
+          return products;
+        }
+      }
+    } catch (_) {
+      if (query.isNotEmpty) {
+        rethrow;
+      }
+
+      final List<Map<String, dynamic>> cachedProducts =
+          await _cacheService.readCachedProducts();
+      if (cachedProducts.isNotEmpty) {
+        return cachedProducts.map(Product.fromJson).toList(growable: false);
       }
     }
     throw const FormatException('Unexpected products payload shape.');

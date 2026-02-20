@@ -1,13 +1,23 @@
+import 'package:flutter_dotenv/flutter_dotenv.dart';
+
 /// Application-wide configuration values.
 ///
 /// Use `--dart-define` to override defaults at build time, for example:
 /// `--dart-define=API_BASE_URL=https://api.example.com`
 class AppConfig {
   /// Raw API base URL from build-time environment.
-  static const String apiBaseUrl = String.fromEnvironment(
+  static const String _buildTimeApiBaseUrl = String.fromEnvironment(
     'API_BASE_URL',
     defaultValue: 'http://localhost:3000',
   );
+
+  static String get apiBaseUrl {
+    final String? envValue = _readDotEnv('API_BASE_URL');
+    if (envValue != null && envValue.trim().isNotEmpty) {
+      return envValue.trim();
+    }
+    return _buildTimeApiBaseUrl;
+  }
 
   /// Normalized and validated API base URI.
   ///
@@ -51,5 +61,13 @@ class AppConfig {
     }
 
     return uri;
+  }
+}
+
+String? _readDotEnv(String key) {
+  try {
+    return dotenv.env[key];
+  } catch (_) {
+    return null;
   }
 }

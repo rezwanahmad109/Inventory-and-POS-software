@@ -34,12 +34,21 @@ export class RolesGuard implements CanActivate {
     return roleName.toLowerCase().trim();
   }
 
+  private collectUserRoles(user: RequestUser): Set<string> {
+    const roles = new Set<string>();
+    if (user.role && user.role.trim().length > 0) {
+      roles.add(this.normalizeRoleName(user.role));
+    }
+    for (const role of user.roles ?? []) {
+      if (role && role.trim().length > 0) {
+        roles.add(this.normalizeRoleName(role));
+      }
+    }
+    return roles;
+  }
+
   private userIsSuperAdmin(user: RequestUser): boolean {
-    const roles = new Set<string>([
-      this.normalizeRoleName(user.role),
-      ...(user.roles ?? []).map((role) => this.normalizeRoleName(role)),
-    ]);
-    return roles.has(RoleName.SUPER_ADMIN);
+    return this.collectUserRoles(user).has(RoleName.SUPER_ADMIN);
   }
 
   canActivate(context: ExecutionContext): boolean {
@@ -89,16 +98,13 @@ export class RolesGuard implements CanActivate {
       return true;
     }
 
-    const userRoles = new Set<string>([
-      this.normalizeRoleName(user.role),
-      ...(user.roles ?? []).map((role) => this.normalizeRoleName(role)),
-    ]);
+    const userRoles = this.collectUserRoles(user);
     const allowedRoles = requiredRoles.map((role) => this.normalizeRoleName(role));
 
     const hasAllowedRole = allowedRoles.some((role) => userRoles.has(role));
     if (!hasAllowedRole) {
       throw new ForbiddenException(
-        `Role "${user.role}" is not permitted for this resource.`,
+        `Role "${Array.from(userRoles).join(', ') || 'none'}" is not permitted for this resource.`,
       );
     }
 

@@ -123,6 +123,7 @@ export class NotificationsService {
 
   async sendNotification(dto: SendNotificationDto): Promise<{
     transport: string;
+    from: string;
     templateKey: string;
     to: string;
     subject: string;
@@ -192,6 +193,7 @@ export class NotificationsService {
     rendered: RenderedEmail,
   ): Promise<{
     transport: string;
+    from: string;
     templateKey: string;
     to: string;
     subject: string;
@@ -199,6 +201,10 @@ export class NotificationsService {
     queuedAt: string;
   }> {
     const transport = this.configService.get<string>('MAIL_TRANSPORT', 'spool');
+    const from = this.configService.get<string>(
+      'EMAIL_FROM',
+      'no-reply@inventory.local',
+    );
     const queuedAt = new Date().toISOString();
 
     await mkdir(this.spoolDirectory, { recursive: true });
@@ -208,6 +214,7 @@ export class NotificationsService {
     const filePath = join(this.spoolDirectory, fileName);
     const payload = {
       transport,
+      from,
       templateKey,
       to,
       subject: rendered.subject,
@@ -218,7 +225,7 @@ export class NotificationsService {
     await writeFile(filePath, JSON.stringify(payload, null, 2), 'utf8');
 
     this.logger.log(
-      `Queued notification template=${templateKey} recipient=${to} transport=${transport}`,
+      `Queued notification template=${templateKey} recipient=${to} from=${from} transport=${transport}`,
     );
 
     return payload;

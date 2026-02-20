@@ -12,6 +12,8 @@ import {
   Put,
   Query,
   Req,
+  UsePipes,
+  ValidationPipe,
   UseGuards,
 } from '@nestjs/common';
 import {
@@ -42,6 +44,13 @@ interface AuthenticatedRequest extends Request {
 @ApiBearerAuth()
 @UseGuards(JwtAuthGuard, RolesGuard)
 @Controller('products')
+@UsePipes(
+  new ValidationPipe({
+    whitelist: true,
+    forbidNonWhitelisted: true,
+    transform: true,
+  }),
+)
 export class ProductsController {
   constructor(private readonly productsService: ProductsService) {}
 

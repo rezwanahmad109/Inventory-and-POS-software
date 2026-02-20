@@ -8,9 +8,15 @@ import { RoleName } from '../common/enums/role-name.enum';
 import { Permission } from './entities/permission.entity';
 import { Role } from './entities/role.entity';
 import { RolePermission } from './entities/role-permission.entity';
+import { Setting } from './entities/setting.entity';
+import { TaxEntity } from './entities/tax.entity';
 import { User } from './entities/user.entity';
 import { UserRole } from './entities/user-role.entity';
+import { Unit } from './entities/product.entity';
 import { runSeed } from './seeds/permission.seed';
+import { runSettingsSeed } from './seeds/settings.seed';
+import { runTaxSeed } from './seeds/tax.seed';
+import { runUnitSeed } from './seeds/unit.seed';
 
 @Injectable()
 export class DatabaseBootstrapService implements OnApplicationBootstrap {
@@ -27,12 +33,19 @@ export class DatabaseBootstrapService implements OnApplicationBootstrap {
     private readonly usersRepository: Repository<User>,
     @InjectRepository(UserRole)
     private readonly userRolesRepository: Repository<UserRole>,
+    @InjectRepository(Unit)
+    private readonly unitsRepository: Repository<Unit>,
+    @InjectRepository(TaxEntity)
+    private readonly taxesRepository: Repository<TaxEntity>,
+    @InjectRepository(Setting)
+    private readonly settingsRepository: Repository<Setting>,
     private readonly configService: ConfigService,
   ) {}
 
   async onApplicationBootstrap(): Promise<void> {
     await this.ensureRoles();
     await this.runPermissionSeed();
+    await this.runReferenceSeeds();
     await this.ensureDefaultAdminUser();
   }
 
@@ -45,6 +58,16 @@ export class DatabaseBootstrapService implements OnApplicationBootstrap {
       );
     } catch (error) {
       this.logger.error('Failed to run permission seed', error);
+    }
+  }
+
+  private async runReferenceSeeds(): Promise<void> {
+    try {
+      await runUnitSeed(this.unitsRepository);
+      await runTaxSeed(this.taxesRepository);
+      await runSettingsSeed(this.settingsRepository);
+    } catch (error) {
+      this.logger.error('Failed to run reference seeds', error);
     }
   }
 
@@ -110,16 +133,8 @@ export class DatabaseBootstrapService implements OnApplicationBootstrap {
 
     const existingAdmin = await this.usersRepository.findOne({
       where: { email: adminEmail },
-      relations: ['role'],
     });
     if (existingAdmin) {
-      // Keep legacy role_id and user_roles in sync for existing bootstrap user.
-      if (existingAdmin.roleId !== bootstrapRole.id) {
-        existingAdmin.role = bootstrapRole;
-        existingAdmin.roleId = bootstrapRole.id;
-        await this.usersRepository.save(existingAdmin);
-      }
-
       await this.ensureUserRoleAssignment(existingAdmin.id, bootstrapRole.id);
       return;
     }
@@ -140,8 +155,6 @@ export class DatabaseBootstrapService implements OnApplicationBootstrap {
       email: adminEmail,
       password: passwordHash,
       name: this.configService.get<string>('ADMIN_NAME', 'System Admin'),
-      role: bootstrapRole,
-      roleId: bootstrapRole.id,
       isActive: true,
     });
 

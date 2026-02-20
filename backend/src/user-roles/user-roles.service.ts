@@ -71,10 +71,6 @@ export class UserRolesService {
     });
 
     const savedUserRole = await this.userRoleRepository.save(userRole);
-    if (!user.roleId) {
-      user.roleId = role.id;
-      await this.userRepository.save(user);
-    }
 
     this.logger.log(
       `Successfully assigned role ${roleId} to user ${userId}`,
@@ -150,11 +146,6 @@ export class UserRolesService {
       );
 
       const savedUserRoles = await queryRunner.manager.save(newUserRoles);
-      if (!user.roleId && savedUserRoles.length > 0) {
-        await queryRunner.manager.update(User, userId, {
-          roleId: savedUserRoles[0].roleId,
-        });
-      }
       await queryRunner.commitTransaction();
 
       this.logger.log(
@@ -195,7 +186,6 @@ export class UserRolesService {
     }
 
     await this.userRoleRepository.remove(userRole);
-    await this.syncLegacyPrimaryRole(userId, roleId);
     this.logger.log(`Successfully removed role ${roleId} from user ${userId}`);
   }
 
@@ -211,13 +201,11 @@ export class UserRolesService {
     });
 
     if (userRoles.length === 0) {
-      await this.userRepository.update(userId, { roleId: null });
       this.logger.warn(`User ${userId} has no roles to remove`);
       return;
     }
 
     await this.userRoleRepository.remove(userRoles);
-    await this.userRepository.update(userId, { roleId: null });
     this.logger.log(`Successfully removed ${userRoles.length} roles from user ${userId}`);
   }
 
@@ -313,26 +301,6 @@ export class UserRolesService {
     return roleIds.every((roleId) => userRoleIds.includes(roleId));
   }
 
-  private async syncLegacyPrimaryRole(
-    userId: string,
-    removedRoleId?: string,
-  ): Promise<void> {
-    const user = await this.userRepository.findOne({
-      where: { id: userId },
-      relations: ['userRoles'],
-    });
-    if (!user) {
-      return;
-    }
-
-    if (!removedRoleId || user.roleId === removedRoleId) {
-      const nextRole = (user.userRoles ?? []).find(
-        (userRole) => userRole.roleId !== removedRoleId,
-      );
-      await this.userRepository.update(userId, { roleId: nextRole?.roleId ?? null });
-    }
-  }
-
   private async ensureSuperAdminRoleWillRemain(
     userId: string,
     removingRoleIds: string[],
@@ -354,8 +322,7 @@ export class UserRolesService {
     }
 
     const userRoleIds = new Set<string>((user.userRoles ?? []).map((userRole) => userRole.roleId));
-    const currentlySuperAdmin =
-      user.roleId === superAdminRole.id || userRoleIds.has(superAdminRole.id);
+    const currentlySuperAdmin = userRoleIds.has(superAdminRole.id);
 
     const removesSuperAdmin =
       removingAllRoles ||
@@ -368,11 +335,7 @@ export class UserRolesService {
     const superAdminAssignments = await this.userRoleRepository.count({
       where: { roleId: superAdminRole.id },
     });
-    const superAdminLegacyUsers = await this.userRepository.count({
-      where: { roleId: superAdminRole.id },
-    });
-
-    if (Math.max(superAdminAssignments, superAdminLegacyUsers) <= 1) {
+    if (superAdminAssignments <= 1) {
       throw new BadRequestException(
         'Cannot remove super admin role from the last super admin user.',
       );

@@ -119,11 +119,11 @@ describe('Critical Workflows (e2e)', () => {
   });
 
   it('handles sales with payment workflow', async () => {
-    const saleId = '00000000-0000-0000-0000-000000000111';
+    const saleId = '550e8400-e29b-41d4-a716-446655440100';
     await request(app.getHttpServer())
       .post('/sales')
       .send({
-        items: [{ productId: '00000000-0000-0000-0000-000000000011', quantity: 1 }],
+        items: [{ productId: '550e8400-e29b-41d4-a716-446655440101', quantity: 1 }],
       })
       .expect(201);
 
@@ -140,10 +140,10 @@ describe('Critical Workflows (e2e)', () => {
     await request(app.getHttpServer())
       .post('/purchases')
       .send({
-        supplierId: '00000000-0000-0000-0000-000000000012',
+        supplierId: '550e8400-e29b-41d4-a716-446655440102',
         items: [
           {
-            productId: '00000000-0000-0000-0000-000000000011',
+            productId: '550e8400-e29b-41d4-a716-446655440101',
             quantity: 5,
             unitPrice: 20,
           },
@@ -154,10 +154,10 @@ describe('Critical Workflows (e2e)', () => {
     await request(app.getHttpServer())
       .post('/purchase-returns')
       .send({
-        originalPurchaseId: '00000000-0000-0000-0000-000000000013',
+        originalPurchaseId: '550e8400-e29b-41d4-a716-446655440103',
         items: [
           {
-            productId: '00000000-0000-0000-0000-000000000011',
+            productId: '550e8400-e29b-41d4-a716-446655440101',
             quantity: 1,
           },
         ],
@@ -170,7 +170,7 @@ describe('Critical Workflows (e2e)', () => {
 
   it('handles POS checkout workflow', async () => {
     await request(app.getHttpServer())
-      .post('/pos/orders/00000000-0000-0000-0000-000000000201/checkout')
+      .post('/pos/orders/550e8400-e29b-41d4-a716-446655440104/checkout')
       .send({
         payments: [{ amount: 30, method: 'cash' }],
       })
@@ -183,8 +183,8 @@ describe('Critical Workflows (e2e)', () => {
     await request(app.getHttpServer())
       .post('/api/wallets/transfer')
       .send({
-        fromWalletId: '00000000-0000-0000-0000-000000000301',
-        toWalletId: '00000000-0000-0000-0000-000000000302',
+        fromWalletId: '550e8400-e29b-41d4-a716-446655440105',
+        toWalletId: '550e8400-e29b-41d4-a716-446655440106',
         amount: 50,
       })
       .expect(201);
@@ -193,13 +193,13 @@ describe('Critical Workflows (e2e)', () => {
   });
 
   it('handles stock transfer lifecycle workflow', async () => {
-    const transferId = '00000000-0000-0000-0000-000000000401';
+    const transferId = '550e8400-e29b-41d4-a716-446655440107';
     await request(app.getHttpServer())
       .post('/stock-transfers')
       .send({
-        fromBranchId: '00000000-0000-0000-0000-000000000501',
-        toBranchId: '00000000-0000-0000-0000-000000000502',
-        productId: '00000000-0000-0000-0000-000000000011',
+        fromBranchId: '550e8400-e29b-41d4-a716-446655440108',
+        toBranchId: '550e8400-e29b-41d4-a716-446655440109',
+        productId: '550e8400-e29b-41d4-a716-446655440101',
         quantity: 3,
       })
       .expect(201);

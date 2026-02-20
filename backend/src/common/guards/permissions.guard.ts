@@ -35,7 +35,15 @@ export class PermissionsGuard implements CanActivate {
     }
 
     // Super admin bypasses all permission checks
-    if (user.role === 'super_admin') {
+    const normalizedRoles = new Set(
+      [
+        ...(user.role ? [user.role] : []),
+        ...(user.roles ?? []),
+      ]
+        .map((role) => role.toLowerCase().trim())
+        .filter((role) => role.length > 0),
+    );
+    if (normalizedRoles.has('super_admin')) {
       this.logger.debug(
         `Super admin user ${user.userId} bypassed permission check for: ${requiredPermissions.join(', ')}`,
       );

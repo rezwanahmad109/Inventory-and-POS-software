@@ -84,7 +84,7 @@ import { UsersModule } from './users/users.module';
 import { WarehousesModule } from './warehouses/warehouses.module';
 import { WalletTransaction } from './database/entities/wallet-transaction.entity';
 import { Wallet } from './database/entities/wallet.entity';
-import { validateEnv } from './config/env.validation';
+import { configValidationSchema } from './config/config.validation';
 
 @Module({
   imports: [
@@ -92,18 +92,17 @@ import { validateEnv } from './config/env.validation';
       isGlobal: true,
       cache: true,
       envFilePath: ['.env.local', '.env'],
-      validate: validateEnv,
+      validationSchema: configValidationSchema,
+      validationOptions: {
+        abortEarly: false,
+      },
     }),
     ThrottlerModule.forRootAsync({
       inject: [ConfigService],
       useFactory: (configService: ConfigService) => [
         {
-          ttl:
-            Number(configService.get<string>('RATE_LIMIT_TTL_SECONDS', '60')) *
-            1000,
-          limit: Number(
-            configService.get<string>('RATE_LIMIT_MAX_REQUESTS', '120'),
-          ),
+          ttl: Number(configService.getOrThrow<string>('RATE_LIMIT_TTL_SECONDS')) * 1000,
+          limit: Number(configService.getOrThrow<string>('RATE_LIMIT_MAX_REQUESTS')),
         },
       ],
     }),
@@ -119,11 +118,11 @@ import { validateEnv } from './config/env.validation';
 
         return {
           type: 'postgres' as const,
-          host: configService.get<string>('DB_HOST', 'localhost'),
-          port: Number(configService.get<string>('DB_PORT', '5432')),
-          username: configService.get<string>('DB_USERNAME', 'postgres'),
-          password: configService.get<string>('DB_PASSWORD', 'postgres'),
-          database: configService.get<string>('DB_NAME', 'inventory_pos'),
+          host: configService.getOrThrow<string>('DB_HOST'),
+          port: Number(configService.getOrThrow<string>('DB_PORT')),
+          username: configService.getOrThrow<string>('DB_USERNAME'),
+          password: configService.getOrThrow<string>('DB_PASSWORD'),
+          database: configService.getOrThrow<string>('DB_NAME'),
           entities: [
             User,
             Role,
@@ -178,7 +177,7 @@ import { validateEnv } from './config/env.validation';
             IdempotencyKey,
           ],
           synchronize,
-          ssl: configService.get<string>('DB_SSL', 'false') === 'true',
+          ssl: configService.getOrThrow<string>('DB_SSL') === 'true',
         };
       },
     }),

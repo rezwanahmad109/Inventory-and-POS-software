@@ -14,17 +14,14 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
     private readonly usersService: UsersService,
   ) {
     const configuredSecret = configService.get<string>('JWT_SECRET');
-    const nodeEnv = configService.get<string>('NODE_ENV', 'development');
-    if (!configuredSecret && nodeEnv === 'production') {
-      throw new Error('JWT_SECRET must be set in production.');
+    if (!configuredSecret || configuredSecret.trim().length === 0) {
+      throw new Error('JWT_SECRET is required.');
     }
 
     super({
       jwtFromRequest: ExtractJwt.fromAuthHeaderAsBearerToken(),
       ignoreExpiration: false,
-      secretOrKey:
-        configuredSecret ??
-        'development-only-secret-change-in-production',
+      secretOrKey: configuredSecret.trim(),
     });
   }
 

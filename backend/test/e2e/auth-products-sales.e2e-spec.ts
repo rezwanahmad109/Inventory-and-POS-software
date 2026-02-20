@@ -110,8 +110,8 @@ describe('Auth + Product + Sales flows (e2e)', () => {
   });
 
   it('handles login, product CRUD, and sale payment flow', async () => {
-    const productId = '00000000-0000-0000-0000-000000000011';
-    const saleId = '00000000-0000-0000-0000-000000000022';
+    const productId = '550e8400-e29b-41d4-a716-446655440000';
+    const saleId = '550e8400-e29b-41d4-a716-446655440001';
 
     await request(app.getHttpServer())
       .post('/auth/login')
@@ -123,7 +123,14 @@ describe('Auth + Product + Sales flows (e2e)', () => {
 
     await request(app.getHttpServer())
       .post('/products')
-      .send({ name: 'Scanner' })
+      .send({
+        name: 'Scanner',
+        sku: 'SKU-SCANNER-1',
+        categoryId: '550e8400-e29b-41d4-a716-446655440010',
+        unitId: '550e8400-e29b-41d4-a716-446655440011',
+        price: 49.99,
+        stockQty: 10,
+      })
       .expect(201);
 
     await request(app.getHttpServer())

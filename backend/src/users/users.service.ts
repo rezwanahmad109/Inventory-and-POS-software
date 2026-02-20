@@ -11,7 +11,6 @@ import { In, Repository } from 'typeorm';
 import { RoleName } from '../common/enums/role-name.enum';
 import { Permission } from '../database/entities/permission.entity';
 import { Role } from '../database/entities/role.entity';
-import { RolePermission } from '../database/entities/role-permission.entity';
 import { User } from '../database/entities/user.entity';
 import { UserRole } from '../database/entities/user-role.entity';
 import { AssignUserRolesDto } from './dto/assign-user-roles.dto';
@@ -39,7 +38,7 @@ export interface ManagedUserProfile {
   name: string;
   email: string;
   status: UserStatus;
-  roleId: string | null;
+  primaryRoleId: string | null;
   roles: string[];
   createdAt: Date;
   updatedAt: Date;
@@ -54,8 +53,6 @@ export class UsersService {
     private readonly rolesRepository: Repository<Role>,
     @InjectRepository(UserRole)
     private readonly userRolesRepository: Repository<UserRole>,
-    @InjectRepository(RolePermission)
-    private readonly rolePermissionsRepository: Repository<RolePermission>,
   ) {}
 
   async findByEmail(email: string): Promise<User | null> {
@@ -63,7 +60,6 @@ export class UsersService {
     return this.usersRepository
       .createQueryBuilder('user')
       .addSelect('user.password')
-      .leftJoinAndSelect('user.role', 'role')
       .where('LOWER(user.email) = :email', { email: normalizedEmail })
       .getOne();
   }
@@ -71,7 +67,7 @@ export class UsersService {
   async findById(id: string): Promise<User | null> {
     return this.usersRepository.findOne({
       where: { id },
-      relations: ['role'],
+      relations: ['userRoles', 'userRoles.role'],
     });
   }
 
@@ -79,24 +75,33 @@ export class UsersService {
     return this.usersRepository
       .createQueryBuilder('user')
       .addSelect('user.refreshTokenHash')
+      .addSelect('user.refreshTokenJtiHash')
       .where('user.id = :userId', { userId })
       .getOne();
   }
 
-  async storeRefreshToken(userId: string, refreshToken: string | null): Promise<void> {
+  async storeRefreshToken(
+    userId: string,
+    refreshToken: string | null,
+    refreshTokenJti: string | null,
+  ): Promise<void> {
     const refreshTokenHash = refreshToken
       ? await bcrypt.hash(refreshToken, 12)
+      : null;
+    const refreshTokenJtiHash = refreshTokenJti
+      ? await bcrypt.hash(refreshTokenJti, 12)
       : null;
 
     await this.usersRepository.update(userId, {
       refreshTokenHash,
+      refreshTokenJtiHash,
       refreshTokenIssuedAt: refreshToken ? new Date() : null,
     });
   }
 
   async findAllManagedUsers(): Promise<ManagedUserProfile[]> {
     const users = await this.usersRepository.find({
-      relations: ['role', 'userRoles', 'userRoles.role'],
+      relations: ['userRoles', 'userRoles.role'],
       order: { createdAt: 'DESC' },
     });
 
@@ -131,7 +136,6 @@ export class UsersService {
       email,
       password: passwordHash,
       isActive: createUserDto.status !== UserStatus.INACTIVE,
-      roleId: role.id,
     });
 
     const savedUser = await this.usersRepository.save(user);
@@ -232,6 +236,7 @@ export class UsersService {
     if (updateUserDto.password !== undefined) {
       user.password = await bcrypt.hash(updateUserDto.password, 12);
       user.refreshTokenHash = null;
+      user.refreshTokenJtiHash = null;
       user.refreshTokenIssuedAt = null;
     }
 
@@ -241,9 +246,6 @@ export class UsersService {
 
     if (updateUserDto.roleId !== undefined) {
       const role = await this.ensureRoleExists(updateUserDto.roleId);
-      user.role = role;
-      user.roleId = role.id;
-
       const existingAssignment = await this.userRolesRepository.findOne({
         where: {
           userId,
@@ -283,13 +285,19 @@ export class UsersService {
       throw new BadRequestException('primaryRoleId must be included in roleIds.');
     }
 
-    const primaryRoleId = assignUserRolesDto.primaryRoleId ?? uniqueRoleIds[0];
-    await this.ensureSuperAdminRetentionOnRoleReplace(user, uniqueRoleIds);
+    const orderedRoleIds = assignUserRolesDto.primaryRoleId
+      ? [
+          assignUserRolesDto.primaryRoleId,
+          ...uniqueRoleIds.filter((roleId) => roleId !== assignUserRolesDto.primaryRoleId),
+        ]
+      : uniqueRoleIds;
+
+    await this.ensureSuperAdminRetentionOnRoleReplace(user, orderedRoleIds);
 
     await this.usersRepository.manager.transaction(async (manager) => {
       await manager.delete(UserRole, { userId });
 
-      const userRoles = uniqueRoleIds.map((roleId) =>
+      const userRoles = orderedRoleIds.map((roleId) =>
         manager.create(UserRole, {
           userId,
           roleId,
@@ -298,7 +306,6 @@ export class UsersService {
       );
 
       await manager.save(UserRole, userRoles);
-      await manager.update(User, userId, { roleId: primaryRoleId });
     });
 
     return this.findManagedUserById(userId);
@@ -385,7 +392,7 @@ export class UsersService {
   private async findUserWithRolesOrFail(userId: string): Promise<User> {
     const user = await this.usersRepository.findOne({
       where: { id: userId },
-      relations: ['role', 'userRoles', 'userRoles.role'],
+      relations: ['userRoles', 'userRoles.role'],
     });
 
     if (!user) {
@@ -407,9 +414,9 @@ export class UsersService {
       return;
     }
 
-    const currentlySuperAdmin =
-      user.roleId === superAdminRole.id ||
-      (user.userRoles ?? []).some((userRole) => userRole.roleId === superAdminRole.id);
+    const currentlySuperAdmin = (user.userRoles ?? []).some(
+      (userRole) => userRole.roleId === superAdminRole.id,
+    );
     const remainsSuperAdmin = replacementRoleIds.includes(superAdminRole.id);
 
     if (!currentlySuperAdmin || remainsSuperAdmin) {
@@ -419,12 +426,7 @@ export class UsersService {
     const superAdminAssignments = await this.userRolesRepository.count({
       where: { roleId: superAdminRole.id },
     });
-
-    const superAdminLegacyUsers = await this.usersRepository.count({
-      where: { roleId: superAdminRole.id },
-    });
-
-    if (Math.max(superAdminAssignments, superAdminLegacyUsers) <= 1) {
+    if (superAdminAssignments <= 1) {
       throw new BadRequestException(
         'Cannot remove super admin role from the last super admin user.',
       );
@@ -440,9 +442,9 @@ export class UsersService {
       return;
     }
 
-    const hasSuperAdminRole =
-      user.roleId === superAdminRole.id ||
-      (user.userRoles ?? []).some((userRole) => userRole.roleId === superAdminRole.id);
+    const hasSuperAdminRole = (user.userRoles ?? []).some(
+      (userRole) => userRole.roleId === superAdminRole.id,
+    );
 
     if (!hasSuperAdminRole) {
       return;
@@ -451,14 +453,27 @@ export class UsersService {
     const superAdminAssignments = await this.userRolesRepository.count({
       where: { roleId: superAdminRole.id },
     });
-
-    const superAdminLegacyUsers = await this.usersRepository.count({
-      where: { roleId: superAdminRole.id },
-    });
-
-    if (Math.max(superAdminAssignments, superAdminLegacyUsers) <= 1) {
+    if (superAdminAssignments <= 1) {
       throw new BadRequestException('Cannot delete the last super admin user.');
     }
+  }
+
+  private resolvePrimaryRoleId(userRoles: UserRole[]): string | null {
+    if (userRoles.length === 0) {
+      return null;
+    }
+
+    const superAdminRole = userRoles.find(
+      (userRole) => userRole.role?.name?.toLowerCase().trim() === RoleName.SUPER_ADMIN,
+    );
+    if (superAdminRole) {
+      return superAdminRole.roleId;
+    }
+
+    const sortedByAssignedAt = [...userRoles].sort(
+      (left, right) => left.assignedAt.getTime() - right.assignedAt.getTime(),
+    );
+    return sortedByAssignedAt[0]?.roleId ?? null;
   }
 
   private toManagedUserProfile(user: User): ManagedUserProfile {
@@ -470,17 +485,14 @@ export class UsersService {
         roles.add(roleName);
       }
     }
-
-    if (roles.size === 0 && user.role?.name) {
-      roles.add(user.role.name.toLowerCase().trim());
-    }
+    const primaryRoleId = this.resolvePrimaryRoleId(user.userRoles ?? []);
 
     return {
       id: user.id,
       name: user.name,
       email: user.email,
       status: user.isActive ? UserStatus.ACTIVE : UserStatus.INACTIVE,
-      roleId: user.roleId ?? null,
+      primaryRoleId,
       roles: Array.from(roles),
       createdAt: user.createdAt,
       updatedAt: user.updatedAt,
@@ -491,7 +503,6 @@ export class UsersService {
     const user = await this.usersRepository.findOne({
       where: { id: userId },
       relations: [
-        'role',
         'userRoles',
         'userRoles.role',
         'userRoles.role.rolePermissions',
@@ -520,30 +531,11 @@ export class UsersService {
       }
     }
 
-    // Backward compatibility while legacy users.role_id still exists.
-    if (roles.size === 0 && user.role?.name) {
-      const legacyRoleName = user.role.name.toLowerCase().trim();
-      roles.add(legacyRoleName);
-
-      const legacyRolePermissions = await this.rolePermissionsRepository.find({
-        where: { roleId: user.role.id },
-        relations: ['permission'],
-      });
-      for (const rolePermission of legacyRolePermissions) {
-        if (rolePermission.permission) {
-          permissions.add(this.normalizePermissionSlug(rolePermission.permission));
-        }
-      }
-    }
-
     const roleList = Array.from(roles);
-    const normalizedPrimaryRole = user.role?.name?.toLowerCase().trim();
 
     const primaryRole = roleList.includes(RoleName.SUPER_ADMIN)
       ? RoleName.SUPER_ADMIN
-      : normalizedPrimaryRole && roleList.includes(normalizedPrimaryRole)
-        ? normalizedPrimaryRole
-        : roleList[0] ?? RoleName.VIEWER;
+      : roleList[0] ?? RoleName.VIEWER;
 
     return {
       user,
@@ -568,8 +560,6 @@ export class UsersService {
       email,
       password: passwordHash,
       name: this.normalizeName(input.name),
-      role,
-      roleId: role.id,
       isActive: true,
     });
 

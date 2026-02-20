@@ -69,6 +69,7 @@ describe('AuthService', () => {
     expect(usersService.storeRefreshToken).toHaveBeenCalledWith(
       'user-1',
       'refresh-token-1',
+      expect.any(String),
     );
   });
 
@@ -78,16 +79,19 @@ describe('AuthService', () => {
       email: 'admin@example.com',
       role: 'admin',
       roles: ['admin'],
+      jti: 'refresh-jti-1',
     };
 
     (jwtService.verifyAsync as jest.Mock).mockResolvedValue(payload);
     const refreshTokenHash = await bcrypt.hash('refresh-token-old', 12);
+    const refreshTokenJtiHash = await bcrypt.hash('refresh-jti-1', 12);
     usersService.findForRefreshValidation.mockResolvedValue({
       id: 'user-1',
       email: 'admin@example.com',
       name: 'Admin',
       isActive: true,
       refreshTokenHash,
+      refreshTokenJtiHash,
     } as any);
     usersService.getUserAccessProfile.mockResolvedValue({
       user: { id: 'user-1' } as any,
@@ -108,13 +112,48 @@ describe('AuthService', () => {
     expect(usersService.storeRefreshToken).toHaveBeenCalledWith(
       'user-1',
       'refresh-token-2',
+      expect.any(String),
     );
   });
 
   it('revokes refresh token on logout', async () => {
     const response = await authService.logout('user-1');
 
-    expect(usersService.storeRefreshToken).toHaveBeenCalledWith('user-1', null);
+    expect(usersService.storeRefreshToken).toHaveBeenCalledWith(
+      'user-1',
+      null,
+      null,
+    );
     expect(response.message).toBe('Logged out successfully.');
+  });
+
+  it('revokes refresh token by token value', async () => {
+    const payload: JwtPayload = {
+      sub: 'user-1',
+      email: 'admin@example.com',
+      role: 'admin',
+      roles: ['admin'],
+      jti: 'refresh-jti-2',
+    };
+    (jwtService.verifyAsync as jest.Mock).mockResolvedValue(payload);
+    usersService.findForRefreshValidation.mockResolvedValue({
+      id: 'user-1',
+      email: 'admin@example.com',
+      name: 'Admin',
+      isActive: true,
+      refreshTokenHash: await bcrypt.hash('refresh-token-old', 12),
+      refreshTokenJtiHash: await bcrypt.hash('refresh-jti-2', 12),
+    } as any);
+
+    const response = await authService.revoke({
+      refreshToken: 'refresh-token-old',
+    });
+
+    expect(response.message).toBe('Refresh token revoked successfully.');
+    expect(usersService.storeRefreshToken).toHaveBeenCalledWith(
+      'user-1',
+      null,
+      null,
+    );
   });
 });

@@ -10,6 +10,8 @@ import {
   HttpStatus,
   ParseUUIDPipe,
   Req,
+  UsePipes,
+  ValidationPipe,
 } from '@nestjs/common';
 import { Request } from 'express';
 
@@ -26,6 +28,13 @@ interface AuthenticatedRequest extends Request {
 
 @Controller('user-roles')
 @UseGuards(JwtAuthGuard, RolesGuard)
+@UsePipes(
+  new ValidationPipe({
+    whitelist: true,
+    forbidNonWhitelisted: true,
+    transform: true,
+  }),
+)
 export class UserRolesController {
   constructor(private readonly userRolesService: UserRolesService) {}
 

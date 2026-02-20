@@ -2,16 +2,17 @@ import {
   CallHandler,
   ExecutionContext,
   Injectable,
-  Logger,
   NestInterceptor,
 } from '@nestjs/common';
 import { Request, Response } from 'express';
 import { Observable } from 'rxjs';
 import { tap } from 'rxjs/operators';
 
+import { AppLoggerService } from '../services/logger.service';
+
 @Injectable()
 export class RequestLoggingInterceptor implements NestInterceptor {
-  private readonly logger = new Logger(RequestLoggingInterceptor.name);
+  constructor(private readonly logger: AppLoggerService) {}
 
   intercept(context: ExecutionContext, next: CallHandler): Observable<unknown> {
     const now = Date.now();
@@ -24,7 +25,15 @@ export class RequestLoggingInterceptor implements NestInterceptor {
         next: () => {
           const durationMs = Date.now() - now;
           this.logger.log(
-            `${request.method} ${request.originalUrl} ${response.statusCode} ${durationMs}ms requestId=${requestId ?? '-'}`,
+            {
+              event: 'http_request',
+              method: request.method,
+              path: request.originalUrl,
+              statusCode: response.statusCode,
+              durationMs,
+              requestId: requestId ?? '-',
+            },
+            RequestLoggingInterceptor.name,
           );
         },
         error: (error: unknown) => {
@@ -32,7 +41,16 @@ export class RequestLoggingInterceptor implements NestInterceptor {
           const message =
             error instanceof Error ? error.message : 'Unknown request error';
           this.logger.warn(
-            `${request.method} ${request.originalUrl} ${response.statusCode} ${durationMs}ms requestId=${requestId ?? '-'} error=${message}`,
+            {
+              event: 'http_request_error',
+              method: request.method,
+              path: request.originalUrl,
+              statusCode: response.statusCode,
+              durationMs,
+              requestId: requestId ?? '-',
+              error: message,
+            },
+            RequestLoggingInterceptor.name,
           );
         },
       }),
