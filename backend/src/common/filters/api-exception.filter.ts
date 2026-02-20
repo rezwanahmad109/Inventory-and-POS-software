@@ -5,14 +5,13 @@ import {
   HttpException,
   HttpStatus,
 } from '@nestjs/common';
-import { Request, Response } from 'express';
+import { Response } from 'express';
 
 @Catch()
 export class ApiExceptionFilter implements ExceptionFilter {
   catch(exception: unknown, host: ArgumentsHost): void {
     const context = host.switchToHttp();
     const response = context.getResponse<Response>();
-    const request = context.getRequest<Request>();
 
     const status =
       exception instanceof HttpException
@@ -22,48 +21,63 @@ export class ApiExceptionFilter implements ExceptionFilter {
     const exceptionResponse =
       exception instanceof HttpException ? exception.getResponse() : null;
 
-    const message = this.resolveMessage(exceptionResponse, exception);
-    const details =
-      typeof exceptionResponse === 'object' && exceptionResponse !== null
-        ? exceptionResponse
-        : null;
+    const errors = this.resolveErrors(exceptionResponse, exception);
+    const message = this.resolveMessage(errors, exception);
 
     response.status(status).json({
-      success: false,
       statusCode: status,
       message,
-      details,
-      timestamp: new Date().toISOString(),
-      path: request.url,
+      errors,
     });
   }
 
-  private resolveMessage(
+  private resolveErrors(
     exceptionResponse: string | object | null,
     exception: unknown,
-  ): string {
+  ): string[] {
     if (typeof exceptionResponse === 'string') {
-      return exceptionResponse;
+      return [exceptionResponse];
     }
 
-    if (
-      typeof exceptionResponse === 'object' &&
-      exceptionResponse !== null &&
-      'message' in exceptionResponse
-    ) {
-      const message = (exceptionResponse as { message?: unknown }).message;
-      if (Array.isArray(message)) {
-        return message.join(', ');
+    if (typeof exceptionResponse === 'object' && exceptionResponse !== null) {
+      const payload = exceptionResponse as {
+        message?: unknown;
+        errors?: unknown;
+      };
+
+      if (Array.isArray(payload.errors)) {
+        return payload.errors
+          .map((error) => String(error))
+          .filter((error) => error.trim().length > 0);
       }
-      if (typeof message === 'string') {
-        return message;
+
+      if (Array.isArray(payload.message)) {
+        return payload.message
+          .map((message) => String(message))
+          .filter((message) => message.trim().length > 0);
       }
+
+      if (typeof payload.message === 'string' && payload.message.trim().length > 0) {
+        return [payload.message];
+      }
+    }
+
+    if (exception instanceof Error) {
+      return [exception.message];
+    }
+
+    return ['Internal server error'];
+  }
+
+  private resolveMessage(errors: string[], exception: unknown): string {
+    if (errors.length > 0) {
+      return errors[0];
     }
 
     if (exception instanceof Error) {
       return exception.message;
     }
 
-    return 'Internal server error';
+    return 'Request failed';
   }
 }

@@ -1,12 +1,12 @@
 /// Application-wide configuration values.
 ///
 /// Use `--dart-define` to override defaults at build time, for example:
-/// `--dart-define=API_BASE_URL=https://api.example.com/api`
+/// `--dart-define=API_BASE_URL=https://api.example.com`
 class AppConfig {
   /// Raw API base URL from build-time environment.
   static const String apiBaseUrl = String.fromEnvironment(
     'API_BASE_URL',
-    defaultValue: 'http://localhost:3000/api',
+    defaultValue: 'http://localhost:3000',
   );
 
   /// Normalized and validated API base URI.
@@ -17,7 +17,8 @@ class AppConfig {
   static Uri get apiBaseUri {
     final Uri uri = Uri.parse(apiBaseUrl);
 
-    final bool isLocal = uri.host == 'localhost' ||
+    final bool isLocal =
+        uri.host == 'localhost' ||
         uri.host == '127.0.0.1' ||
         uri.host == '10.0.2.2' ||
         uri.host == '::1';

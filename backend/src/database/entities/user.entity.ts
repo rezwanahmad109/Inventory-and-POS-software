@@ -26,6 +26,17 @@ export class User {
   @Column({ name: 'password', select: false })
   password!: string;
 
+  @Column({
+    name: 'refresh_token_hash',
+    type: 'text',
+    nullable: true,
+    select: false,
+  })
+  refreshTokenHash!: string | null;
+
+  @Column({ name: 'refresh_token_issued_at', type: 'timestamptz', nullable: true })
+  refreshTokenIssuedAt!: Date | null;
+
   @Column({ length: 160 })
   name!: string;
 

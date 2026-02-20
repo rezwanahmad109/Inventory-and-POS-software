@@ -75,6 +75,25 @@ export class UsersService {
     });
   }
 
+  async findForRefreshValidation(userId: string): Promise<User | null> {
+    return this.usersRepository
+      .createQueryBuilder('user')
+      .addSelect('user.refreshTokenHash')
+      .where('user.id = :userId', { userId })
+      .getOne();
+  }
+
+  async storeRefreshToken(userId: string, refreshToken: string | null): Promise<void> {
+    const refreshTokenHash = refreshToken
+      ? await bcrypt.hash(refreshToken, 12)
+      : null;
+
+    await this.usersRepository.update(userId, {
+      refreshTokenHash,
+      refreshTokenIssuedAt: refreshToken ? new Date() : null,
+    });
+  }
+
   async findAllManagedUsers(): Promise<ManagedUserProfile[]> {
     const users = await this.usersRepository.find({
       relations: ['role', 'userRoles', 'userRoles.role'],
@@ -212,6 +231,8 @@ export class UsersService {
 
     if (updateUserDto.password !== undefined) {
       user.password = await bcrypt.hash(updateUserDto.password, 12);
+      user.refreshTokenHash = null;
+      user.refreshTokenIssuedAt = null;
     }
 
     if (updateUserDto.status !== undefined) {

@@ -11,8 +11,11 @@ import { FinanceInvoice } from '../../database/entities/finance-invoice.entity';
 import { FinanceParty } from '../../database/entities/finance-party.entity';
 import { AuditLog } from '../../database/entities/audit-log.entity';
 import { CreateFinanceInvoiceDto } from '../dto/create-finance-invoice.dto';
+import { FinanceInvoiceQueryDto } from '../dto/finance-invoice-query.dto';
 import { FinanceDocumentType } from '../finance.enums';
 import { JournalPostingService } from './journal-posting.service';
+import { PaginatedResponse } from '../../common/interfaces/paginated-response.interface';
+import { toPaginatedResponse } from '../../common/utils/pagination.util';
 
 @Injectable()
 export class FinanceInvoicesService {
@@ -81,10 +84,35 @@ export class FinanceInvoicesService {
     });
   }
 
-  async findAll(): Promise<FinanceInvoice[]> {
-    return this.financeInvoiceRepository.find({
-      order: { createdAt: 'DESC' },
-    });
+  async findAll(
+    query: FinanceInvoiceQueryDto,
+  ): Promise<PaginatedResponse<FinanceInvoice>> {
+    const page = query.page ?? 1;
+    const limit = query.limit ?? 20;
+
+    const qb = this.financeInvoiceRepository
+      .createQueryBuilder('invoice')
+      .orderBy('invoice.created_at', 'DESC')
+      .skip((page - 1) * limit)
+      .take(limit);
+
+    if (query.partyId) {
+      qb.andWhere('invoice.party_id = :partyId', { partyId: query.partyId });
+    }
+    if (query.documentType) {
+      qb.andWhere('invoice.document_type = :documentType', {
+        documentType: query.documentType,
+      });
+    }
+    if (query.from) {
+      qb.andWhere('invoice.issue_date >= :from', { from: query.from });
+    }
+    if (query.to) {
+      qb.andWhere('invoice.issue_date <= :to', { to: query.to });
+    }
+
+    const [invoices, total] = await qb.getManyAndCount();
+    return toPaginatedResponse(invoices, total, page, limit);
   }
 
   private async postInvoiceJournal(

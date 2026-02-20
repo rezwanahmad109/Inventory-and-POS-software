@@ -22,6 +22,12 @@ export interface EnvironmentVariables extends EnvironmentConfig {
   DB_SSL: 'true' | 'false';
   JWT_SECRET?: string;
   JWT_EXPIRES_IN: string;
+  JWT_REFRESH_SECRET?: string;
+  JWT_REFRESH_EXPIRES_IN: string;
+  CORS_ORIGINS: string;
+  RATE_LIMIT_TTL_SECONDS: string;
+  RATE_LIMIT_MAX_REQUESTS: string;
+  DASHBOARD_CACHE_TTL_SECONDS: string;
   ADMIN_EMAIL: string;
   ADMIN_PASSWORD: string;
   ADMIN_NAME: string;
@@ -75,6 +81,15 @@ function normalizePort(value: string, key: string): string {
   return String(parsed);
 }
 
+function normalizePositiveInteger(value: string, key: string): string {
+  const parsed = Number.parseInt(value, 10);
+  if (!Number.isInteger(parsed) || parsed < 1) {
+    throw new Error(`${key} must be a positive integer.`);
+  }
+
+  return String(parsed);
+}
+
 export function validateEnv(config: EnvironmentConfig): EnvironmentVariables {
   const nodeEnvRaw = readString(config, 'NODE_ENV', 'development').toLowerCase();
   if (!allowedNodeEnvs.has(nodeEnvRaw as NodeEnv)) {
@@ -95,6 +110,21 @@ export function validateEnv(config: EnvironmentConfig): EnvironmentVariables {
   const dbSsl = normalizeBoolean(readString(config, 'DB_SSL', 'false'), 'DB_SSL');
   const jwtSecret = readOptionalString(config, 'JWT_SECRET');
   const jwtExpiresIn = readString(config, 'JWT_EXPIRES_IN', '8h');
+  const jwtRefreshSecret = readOptionalString(config, 'JWT_REFRESH_SECRET');
+  const jwtRefreshExpiresIn = readString(config, 'JWT_REFRESH_EXPIRES_IN', '7d');
+  const corsOrigins = readString(config, 'CORS_ORIGINS', '*');
+  const rateLimitTtlSeconds = normalizePositiveInteger(
+    readString(config, 'RATE_LIMIT_TTL_SECONDS', '60'),
+    'RATE_LIMIT_TTL_SECONDS',
+  );
+  const rateLimitMaxRequests = normalizePositiveInteger(
+    readString(config, 'RATE_LIMIT_MAX_REQUESTS', '120'),
+    'RATE_LIMIT_MAX_REQUESTS',
+  );
+  const dashboardCacheTtlSeconds = normalizePositiveInteger(
+    readString(config, 'DASHBOARD_CACHE_TTL_SECONDS', '30'),
+    'DASHBOARD_CACHE_TTL_SECONDS',
+  );
   const adminEmail = readString(config, 'ADMIN_EMAIL', 'admin@inventory.local');
   const adminPassword = readString(config, 'ADMIN_PASSWORD', 'ChangeMe123!');
   const adminName = readString(config, 'ADMIN_NAME', 'System Admin');
@@ -103,6 +133,11 @@ export function validateEnv(config: EnvironmentConfig): EnvironmentVariables {
   if (nodeEnv === 'production') {
     if (!jwtSecret || jwtSecret === 'replace_with_strong_secret') {
       throw new Error('JWT_SECRET must be set to a strong value in production.');
+    }
+    if (!jwtRefreshSecret || jwtRefreshSecret === 'replace_with_strong_secret') {
+      throw new Error(
+        'JWT_REFRESH_SECRET must be set to a strong value in production.',
+      );
     }
 
     if (dbSynchronize === 'true') {
@@ -129,6 +164,12 @@ export function validateEnv(config: EnvironmentConfig): EnvironmentVariables {
     DB_SSL: dbSsl,
     JWT_SECRET: jwtSecret,
     JWT_EXPIRES_IN: jwtExpiresIn,
+    JWT_REFRESH_SECRET: jwtRefreshSecret,
+    JWT_REFRESH_EXPIRES_IN: jwtRefreshExpiresIn,
+    CORS_ORIGINS: corsOrigins,
+    RATE_LIMIT_TTL_SECONDS: rateLimitTtlSeconds,
+    RATE_LIMIT_MAX_REQUESTS: rateLimitMaxRequests,
+    DASHBOARD_CACHE_TTL_SECONDS: dashboardCacheTtlSeconds,
     ADMIN_EMAIL: adminEmail,
     ADMIN_PASSWORD: adminPassword,
     ADMIN_NAME: adminName,

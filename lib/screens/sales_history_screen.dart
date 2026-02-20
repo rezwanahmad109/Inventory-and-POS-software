@@ -1,49 +1,177 @@
 import 'package:flutter/material.dart';
 
+import '../core/api/api_client.dart';
+
 const Color _kSalesPrimaryBlue = Color(0xFF1F4FFF);
 const Color _kSalesAccentGold = Color(0xFFD4AF37);
 
-/// Sales history screen (UI-only) for listing previous POS invoices.
-class SalesHistoryScreen extends StatelessWidget {
-  const SalesHistoryScreen({super.key});
+class SalesHistoryScreen extends StatefulWidget {
+  const SalesHistoryScreen({required this.apiClient, super.key});
 
-  static const List<SaleHistoryItem> _mockSales = <SaleHistoryItem>[
-    SaleHistoryItem(
-      invoiceNo: 'INV-24001',
-      dateTime: DateTime(2026, 2, 10, 10, 15),
-      totalAmount: 154.75,
-      paymentMethod: 'Cash',
-      itemCount: 4,
-    ),
-    SaleHistoryItem(
-      invoiceNo: 'INV-24002',
-      dateTime: DateTime(2026, 2, 10, 12, 42),
-      totalAmount: 89.40,
-      paymentMethod: 'Card',
-      itemCount: 2,
-    ),
-    SaleHistoryItem(
-      invoiceNo: 'INV-24003',
-      dateTime: DateTime(2026, 2, 9, 18, 5),
-      totalAmount: 223.10,
-      paymentMethod: 'Mobile Payment',
-      itemCount: 6,
-    ),
-    SaleHistoryItem(
-      invoiceNo: 'INV-24004',
-      dateTime: DateTime(2026, 2, 9, 20, 21),
-      totalAmount: 47.99,
-      paymentMethod: 'Cash',
-      itemCount: 1,
-    ),
-    SaleHistoryItem(
-      invoiceNo: 'INV-24005',
-      dateTime: DateTime(2026, 2, 8, 15, 34),
-      totalAmount: 305.60,
-      paymentMethod: 'Card',
-      itemCount: 8,
-    ),
-  ];
+  final ApiClient apiClient;
+
+  @override
+  State<SalesHistoryScreen> createState() => _SalesHistoryScreenState();
+}
+
+class _SalesHistoryScreenState extends State<SalesHistoryScreen> {
+  final TextEditingController _branchController = TextEditingController();
+
+  bool _loading = true;
+  String? _error;
+  int _page = 1;
+  int _totalPages = 1;
+  DateTimeRange? _dateRange;
+  List<SaleHistoryItem> _records = const <SaleHistoryItem>[];
+
+  @override
+  void initState() {
+    super.initState();
+    _loadSales();
+  }
+
+  @override
+  void dispose() {
+    _branchController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _loadSales() async {
+    setState(() {
+      _loading = true;
+      _error = null;
+    });
+
+    try {
+      final Map<String, String> query = <String, String>{
+        'page': _page.toString(),
+        'limit': '20',
+      };
+      final String branchId = _branchController.text.trim();
+      if (branchId.isNotEmpty) {
+        query['branchId'] = branchId;
+      }
+      if (_dateRange != null) {
+        query['from'] = _dateRange!.start.toUtc().toIso8601String();
+        query['to'] = _dateRange!.end.toUtc().toIso8601String();
+      }
+
+      final dynamic response = await widget.apiClient.get(
+        'sales',
+        query: query,
+      );
+
+      final List<dynamic> rows = _extractRows(response);
+      final Map<String, dynamic>? meta = _extractMeta(response);
+
+      final List<SaleHistoryItem> parsed = rows
+          .whereType<Map<String, dynamic>>()
+          .map(_toSaleHistoryItem)
+          .toList(growable: false);
+
+      setState(() {
+        _records = parsed;
+        _totalPages = (meta?['totalPages'] as num?)?.toInt() ?? 1;
+        _loading = false;
+      });
+    } on ApiException catch (error) {
+      setState(() {
+        _error = error.message;
+        _loading = false;
+      });
+    } catch (_) {
+      setState(() {
+        _error = 'Failed to load sales history.';
+        _loading = false;
+      });
+    }
+  }
+
+  List<dynamic> _extractRows(dynamic response) {
+    if (response is List<dynamic>) {
+      return response;
+    }
+    if (response is Map<String, dynamic>) {
+      final dynamic rows =
+          response['items'] ?? response['rows'] ?? response['data'];
+      if (rows is List<dynamic>) {
+        return rows;
+      }
+      if (rows is Map<String, dynamic>) {
+        final dynamic nested = rows['items'];
+        if (nested is List<dynamic>) {
+          return nested;
+        }
+      }
+    }
+    return const <dynamic>[];
+  }
+
+  Map<String, dynamic>? _extractMeta(dynamic response) {
+    if (response is Map<String, dynamic>) {
+      final dynamic meta = response['meta'];
+      if (meta is Map<String, dynamic>) {
+        return meta;
+      }
+      final dynamic nested = response['data'];
+      if (nested is Map<String, dynamic> &&
+          nested['meta'] is Map<String, dynamic>) {
+        return nested['meta'] as Map<String, dynamic>;
+      }
+    }
+    return null;
+  }
+
+  SaleHistoryItem _toSaleHistoryItem(Map<String, dynamic> row) {
+    final String invoiceNo = row['invoiceNumber']?.toString() ?? 'Unknown';
+    final DateTime? createdAt = DateTime.tryParse(
+      row['createdAt']?.toString() ?? '',
+    );
+    final double amount =
+        (row['grandTotal'] as num?)?.toDouble() ??
+        (row['totalAmount'] as num?)?.toDouble() ??
+        0;
+    final String paymentMethod =
+        row['paymentMethod']?.toString() ??
+        row['legacyPaymentMethod']?.toString() ??
+        'Unknown';
+    final int itemCount = (row['items'] as List<dynamic>?)?.length ?? 0;
+
+    return SaleHistoryItem(
+      invoiceNo: invoiceNo,
+      dateTime: createdAt ?? DateTime.now(),
+      totalAmount: amount,
+      paymentMethod: paymentMethod,
+      itemCount: itemCount,
+    );
+  }
+
+  Future<void> _pickDateRange() async {
+    final DateTime now = DateTime.now();
+    final DateTimeRange? selected = await showDateRangePicker(
+      context: context,
+      firstDate: DateTime(now.year - 3),
+      lastDate: DateTime(now.year + 1),
+      initialDateRange: _dateRange,
+    );
+    if (selected == null) return;
+    setState(() {
+      _dateRange = selected;
+      _page = 1;
+    });
+    await _loadSales();
+  }
+
+  Future<void> _applyFilters() async {
+    setState(() => _page = 1);
+    await _loadSales();
+  }
+
+  Future<void> _goToPage(int nextPage) async {
+    if (nextPage < 1 || nextPage > _totalPages) return;
+    setState(() => _page = nextPage);
+    await _loadSales();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -56,53 +184,149 @@ class SalesHistoryScreen extends StatelessWidget {
         surfaceTintColor: Colors.white,
       ),
       body: SafeArea(
-        child: LayoutBuilder(
-          builder: (BuildContext context, BoxConstraints constraints) {
-            final bool isDesktop = constraints.maxWidth >= 900;
-
-            // Keep list centered and readable on large screens.
-            return Align(
-              alignment: Alignment.topCenter,
-              child: ConstrainedBox(
-                constraints: const BoxConstraints(maxWidth: 980),
-                child: ListView.separated(
-                  padding: EdgeInsets.symmetric(
-                    horizontal: isDesktop ? 24 : 12,
-                    vertical: 14,
-                  ),
-                  itemCount: _mockSales.length,
-                  separatorBuilder: (_, __) => const SizedBox(height: 10),
-                  itemBuilder: (BuildContext context, int index) {
-                    final SaleHistoryItem sale = _mockSales[index];
-                    return _SaleHistoryCard(
-                      sale: sale,
-                      onTap: () {
-                        // Placeholder action for future sale details route.
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          SnackBar(
-                            content: Text(
-                              'Details for ${sale.invoiceNo} will be added soon.',
-                            ),
-                          ),
-                        );
-                      },
-                    );
-                  },
+        child: Column(
+          children: <Widget>[
+            _SalesFilterBar(
+              branchController: _branchController,
+              dateRange: _dateRange,
+              onPickDateRange: () {
+                _pickDateRange();
+              },
+              onApplyFilters: () {
+                _applyFilters();
+              },
+            ),
+            Expanded(
+              child: _loading
+                  ? const Center(child: CircularProgressIndicator())
+                  : _error != null
+                  ? Center(
+                      child: Text(
+                        _error!,
+                        style: const TextStyle(color: Colors.red),
+                      ),
+                    )
+                  : _records.isEmpty
+                  ? const Center(child: Text('No sales found.'))
+                  : RefreshIndicator(
+                      onRefresh: _loadSales,
+                      child: ListView.separated(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 12,
+                          vertical: 10,
+                        ),
+                        itemCount: _records.length,
+                        separatorBuilder: (_, __) => const SizedBox(height: 10),
+                        itemBuilder: (BuildContext context, int index) {
+                          final SaleHistoryItem sale = _records[index];
+                          return _SaleHistoryCard(sale: sale, onTap: () {});
+                        },
+                      ),
+                    ),
+            ),
+            if (!_loading)
+              Padding(
+                padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.end,
+                  children: <Widget>[
+                    OutlinedButton(
+                      onPressed: _page <= 1 ? null : () => _goToPage(_page - 1),
+                      child: const Text('Prev'),
+                    ),
+                    const SizedBox(width: 8),
+                    Text('Page $_page / $_totalPages'),
+                    const SizedBox(width: 8),
+                    OutlinedButton(
+                      onPressed: _page >= _totalPages
+                          ? null
+                          : () => _goToPage(_page + 1),
+                      child: const Text('Next'),
+                    ),
+                  ],
                 ),
               ),
-            );
-          },
+          ],
         ),
       ),
     );
   }
 }
 
-class _SaleHistoryCard extends StatelessWidget {
-  const _SaleHistoryCard({
-    required this.sale,
-    required this.onTap,
+class _SalesFilterBar extends StatelessWidget {
+  const _SalesFilterBar({
+    required this.branchController,
+    required this.dateRange,
+    required this.onPickDateRange,
+    required this.onApplyFilters,
   });
+
+  final TextEditingController branchController;
+  final DateTimeRange? dateRange;
+  final VoidCallback onPickDateRange;
+  final VoidCallback onApplyFilters;
+
+  @override
+  Widget build(BuildContext context) {
+    final String dateLabel = dateRange == null
+        ? 'Select date range'
+        : '${dateRange!.start.toLocal().toString().split(' ').first} - ${dateRange!.end.toLocal().toString().split(' ').first}';
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(12, 12, 12, 6),
+      child: LayoutBuilder(
+        builder: (BuildContext context, BoxConstraints constraints) {
+          final bool compact = constraints.maxWidth < 640;
+          final Widget branchField = TextField(
+            controller: branchController,
+            decoration: const InputDecoration(
+              labelText: 'Branch ID (optional)',
+              prefixIcon: Icon(Icons.store_mall_directory_outlined),
+            ),
+          );
+
+          final Widget controls = Row(
+            children: <Widget>[
+              Expanded(
+                child: OutlinedButton.icon(
+                  onPressed: onPickDateRange,
+                  icon: const Icon(Icons.date_range_outlined),
+                  label: Text(dateLabel, overflow: TextOverflow.ellipsis),
+                ),
+              ),
+              const SizedBox(width: 8),
+              FilledButton(
+                onPressed: onApplyFilters,
+                child: const Text('Apply'),
+              ),
+            ],
+          );
+
+          if (compact) {
+            return Column(
+              children: <Widget>[
+                branchField,
+                const SizedBox(height: 8),
+                controls,
+              ],
+            );
+          }
+
+          return Row(
+            children: <Widget>[
+              Expanded(flex: 2, child: branchField),
+              const SizedBox(width: 8),
+              Expanded(flex: 3, child: controls),
+            ],
+          );
+        },
+      ),
+    );
+  }
+}
+
+class _SaleHistoryCard extends StatelessWidget {
+  const _SaleHistoryCard({required this.sale, required this.onTap});
 
   final SaleHistoryItem sale;
   final VoidCallback onTap;
@@ -111,9 +335,7 @@ class _SaleHistoryCard extends StatelessWidget {
   Widget build(BuildContext context) {
     return Card(
       elevation: 1,
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(14),
-      ),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
       child: InkWell(
         borderRadius: BorderRadius.circular(14),
         onTap: onTap,
@@ -148,7 +370,6 @@ class _SaleHistoryCard extends StatelessWidget {
     );
   }
 
-  // Left section: invoice metadata.
   Widget _buildPrimaryInfo(BuildContext context) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -177,7 +398,11 @@ class _SaleHistoryCard extends StatelessWidget {
         const SizedBox(height: 4),
         Row(
           children: <Widget>[
-            const Icon(Icons.payments_outlined, size: 16, color: Colors.black54),
+            const Icon(
+              Icons.payments_outlined,
+              size: 16,
+              color: Colors.black54,
+            ),
             const SizedBox(width: 6),
             Text(
               sale.paymentMethod,
@@ -194,7 +419,6 @@ class _SaleHistoryCard extends StatelessWidget {
     );
   }
 
-  // Right section: total highlight.
   Widget _buildAmountInfo() {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.end,

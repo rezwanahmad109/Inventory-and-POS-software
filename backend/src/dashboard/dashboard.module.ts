@@ -1,4 +1,6 @@
+import { CacheModule } from '@nestjs/cache-manager';
 import { Module } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { TypeOrmModule } from '@nestjs/typeorm';
 
 import { BranchProductEntity } from '../database/entities/branch-product.entity';
@@ -14,6 +16,15 @@ import { DashboardService } from './dashboard.service';
 
 @Module({
   imports: [
+    CacheModule.registerAsync({
+      inject: [ConfigService],
+      useFactory: (configService: ConfigService) => ({
+        ttl: Number(
+          configService.get<string>('DASHBOARD_CACHE_TTL_SECONDS', '30'),
+        ),
+        max: 100,
+      }),
+    }),
     TypeOrmModule.forFeature([
       Sale,
       Purchase,

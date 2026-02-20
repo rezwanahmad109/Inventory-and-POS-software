@@ -1,5 +1,7 @@
-import { Injectable } from '@nestjs/common';
+import { CACHE_MANAGER } from '@nestjs/cache-manager';
+import { Inject, Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
+import { Cache } from 'cache-manager';
 import { Repository } from 'typeorm';
 
 import { BranchProductEntity } from '../database/entities/branch-product.entity';
@@ -18,6 +20,8 @@ import {
 
 @Injectable()
 export class DashboardService {
+  private readonly summaryCacheKey = 'dashboard:summary:v1';
+
   constructor(
     @InjectRepository(Sale)
     private readonly saleRepository: Repository<Sale>,
@@ -35,9 +39,18 @@ export class DashboardService {
     private readonly productRepository: Repository<Product>,
     @InjectRepository(BranchProductEntity)
     private readonly branchProductsRepository: Repository<BranchProductEntity>,
+    @Inject(CACHE_MANAGER)
+    private readonly cacheManager: Cache,
   ) {}
 
   async getSummary(): Promise<DashboardSummaryDto> {
+    const cached = await this.cacheManager.get<DashboardSummaryDto>(
+      this.summaryCacheKey,
+    );
+    if (cached) {
+      return cached;
+    }
+
     const now = new Date();
     const todayStart = new Date(
       Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()),
@@ -178,7 +191,7 @@ export class DashboardService {
     const totalPaymentsReceived = this.toMoney(paymentsReceived?.total);
     const totalPaymentsSent = this.toMoney(paymentsSent?.total);
 
-    return {
+    const summary: DashboardSummaryDto = {
       totalSalesToday,
       totalSalesThisMonth,
       totalDue,
@@ -198,6 +211,9 @@ export class DashboardService {
       salesChart,
       paymentsChart,
     };
+
+    await this.cacheManager.set(this.summaryCacheKey, summary);
+    return summary;
   }
 
   private async getTopSellingProducts(

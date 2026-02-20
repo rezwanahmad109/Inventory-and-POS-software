@@ -14,8 +14,11 @@ import { PaymentAllocation } from '../../database/entities/payment-allocation.en
 import { WalletTransaction } from '../../database/entities/wallet-transaction.entity';
 import { Wallet } from '../../database/entities/wallet.entity';
 import { CreateFinancePaymentDto } from '../dto/create-finance-payment.dto';
+import { FinancePaymentQueryDto } from '../dto/finance-payment-query.dto';
 import { FinancePaymentDirection } from '../finance.enums';
 import { JournalPostingService } from './journal-posting.service';
+import { PaginatedResponse } from '../../common/interfaces/paginated-response.interface';
+import { toPaginatedResponse } from '../../common/utils/pagination.util';
 
 @Injectable()
 export class FinancePaymentsService {
@@ -139,10 +142,36 @@ export class FinancePaymentsService {
     });
   }
 
-  async findAll(): Promise<FinancePayment[]> {
-    return this.financePaymentRepository.find({
-      order: { createdAt: 'DESC' },
-    });
+  async findAll(
+    query: FinancePaymentQueryDto,
+  ): Promise<PaginatedResponse<FinancePayment>> {
+    const page = query.page ?? 1;
+    const limit = query.limit ?? 20;
+
+    const qb = this.financePaymentRepository
+      .createQueryBuilder('payment')
+      .orderBy('payment.created_at', 'DESC')
+      .skip((page - 1) * limit)
+      .take(limit);
+
+    if (query.partyId) {
+      qb.andWhere('payment.party_id = :partyId', { partyId: query.partyId });
+    }
+    if (query.walletId) {
+      qb.andWhere('payment.wallet_id = :walletId', { walletId: query.walletId });
+    }
+    if (query.direction) {
+      qb.andWhere('payment.direction = :direction', { direction: query.direction });
+    }
+    if (query.from) {
+      qb.andWhere('payment.created_at >= :from', { from: query.from });
+    }
+    if (query.to) {
+      qb.andWhere('payment.created_at <= :to', { to: query.to });
+    }
+
+    const [payments, total] = await qb.getManyAndCount();
+    return toPaginatedResponse(payments, total, page, limit);
   }
 
   private async postPaymentJournal(

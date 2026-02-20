@@ -3,6 +3,7 @@ import {
   Controller,
   Get,
   Post,
+  Query,
   Req,
   UseGuards,
 } from '@nestjs/common';
@@ -18,6 +19,7 @@ import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
 import { RequestUser } from '../common/interfaces/request-user.interface';
 import { CreateFinancePaymentDto } from './dto/create-finance-payment.dto';
+import { FinancePaymentQueryDto } from './dto/finance-payment-query.dto';
 import { FinancePaymentsService } from './services/finance-payments.service';
 
 interface AuthenticatedRequest extends Request {
@@ -55,7 +57,7 @@ export class FinancePaymentsController {
   @Get()
   @Permissions('finance_payments.read')
   @ApiOperation({ summary: 'List finance payments' })
-  findAll() {
-    return this.financePaymentsService.findAll();
+  findAll(@Query() query: FinancePaymentQueryDto) {
+    return this.financePaymentsService.findAll(query);
   }
 }

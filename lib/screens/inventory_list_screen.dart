@@ -1,17 +1,17 @@
 import 'dart:async';
-import 'dart:convert';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
-import 'package:http/http.dart' as http;
 
-import '../app_config.dart';
 import '../app_routes.dart';
+import '../core/api/api_client.dart';
 import '../features/auth/bloc/auth_bloc.dart';
 import '../features/auth/bloc/auth_state.dart';
 
 class InventoryListScreen extends StatefulWidget {
-  const InventoryListScreen({super.key});
+  const InventoryListScreen({required this.apiClient, super.key});
+
+  final ApiClient apiClient;
 
   @override
   State<InventoryListScreen> createState() => _InventoryListScreenState();
@@ -19,9 +19,7 @@ class InventoryListScreen extends StatefulWidget {
 
 class _InventoryListScreenState extends State<InventoryListScreen> {
   final TextEditingController _searchController = TextEditingController();
-  final InventoryApiService _apiService = InventoryApiService(
-    baseUri: AppConfig.apiBaseUri,
-  );
+  late final InventoryApiService _apiService;
 
   late Future<List<Product>> _productsFuture;
   Timer? _searchDebounce;
@@ -30,6 +28,7 @@ class _InventoryListScreenState extends State<InventoryListScreen> {
   @override
   void initState() {
     super.initState();
+    _apiService = InventoryApiService(apiClient: widget.apiClient);
     _productsFuture = _apiService.fetchProducts();
   }
 
@@ -37,7 +36,6 @@ class _InventoryListScreenState extends State<InventoryListScreen> {
   void dispose() {
     _searchDebounce?.cancel();
     _searchController.dispose();
-    _apiService.dispose();
     super.dispose();
   }
 
@@ -123,10 +121,10 @@ class _InventoryListScreenState extends State<InventoryListScreen> {
           ),
           BlocBuilder<AuthBloc, AuthState>(
             builder: (BuildContext context, AuthState authState) {
-              if (
-                  !authState.hasAnyRole(
-                    const <String>['admin', 'super_admin'],
-                  )) {
+              if (!authState.hasAnyRole(const <String>[
+                'admin',
+                'super_admin',
+              ])) {
                 return const SizedBox.shrink();
               }
               return IconButton(
@@ -149,9 +147,10 @@ class _InventoryListScreenState extends State<InventoryListScreen> {
             canCreatePurchaseReturn: authState.hasPermission(
               'purchase_returns.create',
             ),
-            canAccessSettings: authState.hasAnyRole(
-              const <String>['admin', 'super_admin'],
-            ),
+            canAccessSettings: authState.hasAnyRole(const <String>[
+              'admin',
+              'super_admin',
+            ]),
           );
         },
       ),
@@ -186,9 +185,7 @@ class _InventoryListScreenState extends State<InventoryListScreen> {
                       final List<Product> products =
                           snapshot.data ?? <Product>[];
                       final List<Product> visibleProducts = _showLowStockOnly
-                          ? products
-                                .where((Product p) => p.isLowStock)
-                                .toList()
+                          ? products.where((Product p) => p.isLowStock).toList()
                           : products;
 
                       if (visibleProducts.isEmpty) {
@@ -221,9 +218,10 @@ class _InventoryListScreenState extends State<InventoryListScreen> {
       ),
       bottomNavigationBar: BlocBuilder<AuthBloc, AuthState>(
         builder: (BuildContext context, AuthState authState) {
-          final bool canAccessSettings = authState.hasAnyRole(
-            const <String>['admin', 'super_admin'],
-          );
+          final bool canAccessSettings = authState.hasAnyRole(const <String>[
+            'admin',
+            'super_admin',
+          ]);
 
           final List<String?> routes = <String?>[
             null,
@@ -668,79 +666,65 @@ class Product {
   final int stockQty;
   final int lowStockThreshold;
 
-  bool get isLowStock =>
-      lowStockThreshold > 0 && stockQty <= lowStockThreshold;
+  bool get isLowStock => lowStockThreshold > 0 && stockQty <= lowStockThreshold;
 
   factory Product.fromJson(Map<String, dynamic> json) {
     final num thresholdRaw =
         (json['lowStockThreshold'] as num?) ??
         (json['low_stock_threshold'] as num?) ??
         0;
+    final dynamic categoryPayload = json['category'];
+    final String category = categoryPayload is Map<String, dynamic>
+        ? (categoryPayload['name']?.toString() ?? 'General')
+        : (categoryPayload?.toString() ?? 'General');
 
     return Product(
       id: '${json['id'] ?? ''}',
       sku: '${json['sku'] ?? ''}',
       name: '${json['name'] ?? ''}',
-      category: '${json['category'] ?? 'General'}',
-      unitPrice: (json['unitPrice'] as num?)?.toDouble() ?? 0,
-      stockQty: (json['stockQty'] as num?)?.toInt() ?? 0,
+      category: category,
+      unitPrice:
+          (json['unitPrice'] as num?)?.toDouble() ??
+          (json['price'] as num?)?.toDouble() ??
+          0,
+      stockQty:
+          (json['stockQty'] as num?)?.toInt() ??
+          (json['stock_qty'] as num?)?.toInt() ??
+          0,
       lowStockThreshold: thresholdRaw.toInt(),
     );
   }
 }
 
 class InventoryApiService {
-  InventoryApiService({required this.baseUri, http.Client? client})
-    : _client = client ?? http.Client();
+  InventoryApiService({required ApiClient apiClient}) : _apiClient = apiClient;
 
-  static const Duration _requestTimeout = Duration(seconds: 8);
-
-  final Uri baseUri;
-  final http.Client _client;
+  final ApiClient _apiClient;
 
   Future<List<Product>> fetchProducts({String query = ''}) async {
-    final Uri uri = _buildProductsUri(query: query);
-
-    try {
-      final http.Response response = await _client
-          .get(uri)
-          .timeout(_requestTimeout);
-      if (response.statusCode == 200) {
-        final dynamic decoded = jsonDecode(response.body);
-        if (decoded is List<dynamic>) {
-          return _asProductList(decoded);
-        }
-        if (decoded is Map<String, dynamic>) {
-          final dynamic collection = decoded['items'] ?? decoded['data'];
-          if (collection is List<dynamic>) {
-            return _asProductList(collection);
-          }
-        }
-        throw const FormatException('Unexpected products payload shape.');
-      }
-      throw Exception('API response ${response.statusCode}');
-    } catch (_) {
-      // Keep UI work unblocked with local fallback data when API is unavailable.
-      final List<Product> fallback = _seedProducts;
-      if (query.isEmpty) return fallback;
-      final String q = query.toLowerCase();
-      return fallback
-          .where(
-            (Product p) =>
-                p.name.toLowerCase().contains(q) ||
-                p.sku.toLowerCase().contains(q) ||
-                p.category.toLowerCase().contains(q),
-          )
-          .toList(growable: false);
+    dynamic payload;
+    if (query.isEmpty) {
+      payload = await _apiClient.get(
+        'products',
+        query: const <String, String>{'page': '1', 'limit': '100'},
+      );
+    } else {
+      payload = await _apiClient.get(
+        'products/search',
+        query: <String, String>{'q': query, 'limit': '100'},
+      );
     }
-  }
 
-  Uri _buildProductsUri({required String query}) {
-    final Uri endpoint = baseUri.resolve(
-      baseUri.path.endsWith('/') ? 'products' : '${baseUri.path}/products',
-    );
-    if (query.isEmpty) return endpoint;
-    return endpoint.replace(queryParameters: <String, String>{'query': query});
+    if (payload is List<dynamic>) {
+      return _asProductList(payload);
+    }
+    if (payload is Map<String, dynamic>) {
+      final dynamic collection = payload['items'] ?? payload['data'];
+      if (collection is List<dynamic>) {
+        return _asProductList(collection);
+      }
+    }
+    throw const FormatException('Unexpected products payload shape.');
   }
 
   List<Product> _asProductList(List<dynamic> rows) {
@@ -749,65 +733,4 @@ class InventoryApiService {
         .map(Product.fromJson)
         .toList(growable: false);
   }
-
-  void dispose() {
-    _client.close();
-  }
 }
-
-const List<Product> _seedProducts = <Product>[
-  Product(
-    id: '1',
-    sku: 'SKU-1001',
-    name: 'Barcode Scanner',
-    category: 'Hardware',
-    unitPrice: 49.99,
-    stockQty: 18,
-    lowStockThreshold: 6,
-  ),
-  Product(
-    id: '2',
-    sku: 'SKU-1002',
-    name: 'Thermal Printer',
-    category: 'Hardware',
-    unitPrice: 179.0,
-    stockQty: 7,
-    lowStockThreshold: 8,
-  ),
-  Product(
-    id: '3',
-    sku: 'SKU-1003',
-    name: 'Receipt Roll',
-    category: 'Consumables',
-    unitPrice: 4.99,
-    stockQty: 92,
-    lowStockThreshold: 12,
-  ),
-  Product(
-    id: '4',
-    sku: 'SKU-1004',
-    name: 'Card Reader',
-    category: 'Hardware',
-    unitPrice: 89.5,
-    stockQty: 11,
-    lowStockThreshold: 10,
-  ),
-  Product(
-    id: '5',
-    sku: 'SKU-1005',
-    name: 'Cash Drawer',
-    category: 'Hardware',
-    unitPrice: 129.0,
-    stockQty: 5,
-    lowStockThreshold: 5,
-  ),
-  Product(
-    id: '6',
-    sku: 'SKU-1006',
-    name: 'USB Keyboard',
-    category: 'Accessories',
-    unitPrice: 24.0,
-    stockQty: 33,
-    lowStockThreshold: 7,
-  ),
-];

@@ -87,7 +87,7 @@ class InventoryPosApp extends StatelessWidget {
                   if (authState.status != AuthStatus.authenticated) {
                     return LoginPage(apiClient: _apiClient);
                   }
-                  return const InventoryListScreen();
+                  return InventoryListScreen(apiClient: _apiClient);
                 },
               ),
           AppRoutes.cartCheckout: (BuildContext context) =>
@@ -105,7 +105,7 @@ class InventoryPosApp extends StatelessWidget {
                   if (authState.status != AuthStatus.authenticated) {
                     return LoginPage(apiClient: _apiClient);
                   }
-                  return const SalesHistoryScreen();
+                  return SalesHistoryScreen(apiClient: _apiClient);
                 },
               ),
           AppRoutes.salesReturn: (BuildContext context) =>
@@ -138,10 +138,10 @@ class InventoryPosApp extends StatelessWidget {
                   if (authState.status != AuthStatus.authenticated) {
                     return LoginPage(apiClient: _apiClient);
                   }
-                  if (
-                      !authState.hasAnyRole(
-                        const <String>['admin', 'super_admin'],
-                      )) {
+                  if (!authState.hasAnyRole(const <String>[
+                    'admin',
+                    'super_admin',
+                  ])) {
                     return const _AccessDeniedPage(title: 'Settings');
                   }
                   return AdminSettingsScreen(apiClient: _apiClient);

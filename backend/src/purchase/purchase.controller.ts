@@ -8,6 +8,7 @@ import {
   Param,
   ParseUUIDPipe,
   Post,
+  Query,
   Put,
   Req,
   UseGuards,
@@ -26,6 +27,7 @@ import { RolesGuard } from '../common/guards/roles.guard';
 import { RequestUser } from '../common/interfaces/request-user.interface';
 import { ConvertPurchaseEstimateDto } from './dto/convert-purchase-estimate.dto';
 import { CreatePurchaseDto } from './dto/create-purchase.dto';
+import { PurchaseQueryDto } from './dto/purchase-query.dto';
 import { RecordPurchasePaymentDto } from './dto/record-purchase-payment.dto';
 import { UpdatePurchaseDto } from './dto/update-purchase.dto';
 import { PurchaseService } from './purchase.service';
@@ -44,8 +46,8 @@ export class PurchaseController {
   @Get()
   @Permissions('purchases.read')
   @ApiOperation({ summary: 'Get all purchases' })
-  findAll() {
-    return this.purchaseService.findAll();
+  findAll(@Query() query: PurchaseQueryDto) {
+    return this.purchaseService.findAll(query);
   }
 
   @Get(':id')

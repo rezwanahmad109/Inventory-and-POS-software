@@ -24,8 +24,11 @@ import {
   CreateProductDto,
   ProductPriceTierInputDto,
 } from './dto/create-product.dto';
+import { ProductsQueryDto } from './dto/products-query.dto';
 import { StockAdjustmentDto } from './dto/stock-adjustment.dto';
 import { UpdateProductDto } from './dto/update-product.dto';
+import { PaginatedResponse } from '../common/interfaces/paginated-response.interface';
+import { toPaginatedResponse } from '../common/utils/pagination.util';
 
 export type ProductView = Product & {
   stockValue: number;
@@ -127,12 +130,29 @@ export class ProductsService {
     return this.findOne(saved.id);
   }
 
-  async findAll(filters: ProductFilters = {}): Promise<ProductView[]> {
-    const products = await this.buildProductQuery(filters)
-      .orderBy('product.createdAt', 'DESC')
-      .getMany();
+  async findAll(
+    query: ProductsQueryDto = {} as ProductsQueryDto,
+  ): Promise<PaginatedResponse<ProductView>> {
+    const page = query.page ?? 1;
+    const limit = query.limit ?? 20;
+    const filters: ProductFilters = {
+      categoryId: query.categoryId,
+      unitId: query.unitId,
+    };
 
-    return products.map((product) => this.toProductView(product));
+    const qb = this.buildProductQuery(filters)
+      .distinct(true)
+      .orderBy('product.createdAt', 'DESC')
+      .skip((page - 1) * limit)
+      .take(limit);
+
+    const [products, total] = await qb.getManyAndCount();
+    return toPaginatedResponse(
+      products.map((product) => this.toProductView(product)),
+      total,
+      page,
+      limit,
+    );
   }
 
   async findOne(id: string): Promise<ProductView> {
@@ -391,7 +411,9 @@ export class ProductsService {
   }
 
   async exportCsv(filters: ProductFilters = {}): Promise<string> {
-    const products = await this.findAll(filters);
+    const products = await this.buildProductQuery(filters)
+      .orderBy('product.createdAt', 'DESC')
+      .getMany();
     const rows = [
       [
         'id',
@@ -410,23 +432,26 @@ export class ProductsService {
         'variationAttributes',
         'description',
       ],
-      ...products.map((product) => [
-        product.id,
-        product.name,
-        product.sku,
-        product.barcode ?? '',
-        (product.additionalBarcodes ?? []).join('|'),
-        product.brand ?? '',
-        product.categoryId,
-        product.unitId,
-        String(product.price),
-        product.taxRate === null ? '' : String(product.taxRate),
-        product.taxMethod,
-        String(product.stockQty),
-        String(product.lowStockThreshold ?? 0),
-        JSON.stringify(product.variationAttributes ?? {}),
-        product.description ?? '',
-      ]),
+      ...products.map((productRow) => {
+        const product = this.toProductView(productRow);
+        return [
+          product.id,
+          product.name,
+          product.sku,
+          product.barcode ?? '',
+          (product.additionalBarcodes ?? []).join('|'),
+          product.brand ?? '',
+          product.categoryId,
+          product.unitId,
+          String(product.price),
+          product.taxRate === null ? '' : String(product.taxRate),
+          product.taxMethod,
+          String(product.stockQty),
+          String(product.lowStockThreshold ?? 0),
+          JSON.stringify(product.variationAttributes ?? {}),
+          product.description ?? '',
+        ];
+      }),
     ];
 
     return rows

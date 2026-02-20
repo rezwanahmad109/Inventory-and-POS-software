@@ -28,9 +28,9 @@ class ApiClient {
   }
 
   Map<String, String> get _headers => {
-        'Content-Type': 'application/json',
-        if (token != null) 'Authorization': 'Bearer $token',
-      };
+    'Content-Type': 'application/json',
+    if (token != null) 'Authorization': 'Bearer $token',
+  };
 
   Future<dynamic> get(String path, {Map<String, String>? query}) async {
     try {
@@ -82,12 +82,24 @@ class ApiClient {
   dynamic _handleResponse(http.Response response) {
     if (response.statusCode >= 200 && response.statusCode < 300) {
       if (response.body.isEmpty) return null;
-      return jsonDecode(response.body);
+      final dynamic body = jsonDecode(response.body);
+      if (body is Map<String, dynamic> &&
+          body.containsKey('statusCode') &&
+          body.containsKey('data')) {
+        return body['data'];
+      }
+      return body;
     }
     String message = 'Request failed';
     try {
-      final body = jsonDecode(response.body);
-      message = body['message']?.toString() ?? message;
+      final dynamic body = jsonDecode(response.body);
+      if (body is Map<String, dynamic>) {
+        message = body['message']?.toString() ?? message;
+        final dynamic errors = body['errors'];
+        if (errors is List<dynamic> && errors.isNotEmpty) {
+          message = errors.map((dynamic value) => value.toString()).join(', ');
+        }
+      }
     } catch (_) {
       message = response.body;
     }

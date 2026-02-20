@@ -8,6 +8,7 @@ import {
   ParseUUIDPipe,
   Param,
   Post,
+  Query,
   Res,
   Put,
   Req,
@@ -29,6 +30,7 @@ import { RequestUser } from '../common/interfaces/request-user.interface';
 import { ConvertSaleQuotationDto } from './dto/convert-sale-quotation.dto';
 import { CreateSaleDto } from './dto/create-sale.dto';
 import { RecordSalePaymentDto } from './dto/record-sale-payment.dto';
+import { SalesQueryDto } from './dto/sales-query.dto';
 import { UpdateSaleDto } from './dto/update-sale.dto';
 import { SalesPdfService } from './sales-pdf.service';
 import { SalesService } from './sales.service';
@@ -61,8 +63,8 @@ export class SalesController {
   @Get()
   @Permissions('sales.view')
   @ApiOperation({ summary: 'List sales invoices' })
-  findAll() {
-    return this.salesService.findAll();
+  findAll(@Query() query: SalesQueryDto) {
+    return this.salesService.findAll(query);
   }
 
   @Get(':id')

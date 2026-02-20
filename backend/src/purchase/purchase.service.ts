@@ -24,8 +24,11 @@ import { NotificationsService } from '../notifications/notifications.service';
 import { ProductsService } from '../products/products.service';
 import { ConvertPurchaseEstimateDto } from './dto/convert-purchase-estimate.dto';
 import { CreatePurchaseDto } from './dto/create-purchase.dto';
+import { PurchaseQueryDto } from './dto/purchase-query.dto';
 import { RecordPurchasePaymentDto } from './dto/record-purchase-payment.dto';
 import { UpdatePurchaseDto } from './dto/update-purchase.dto';
+import { PaginatedResponse } from '../common/interfaces/paginated-response.interface';
+import { toPaginatedResponse } from '../common/utils/pagination.util';
 
 @Injectable()
 export class PurchaseService {
@@ -42,11 +45,44 @@ export class PurchaseService {
     private readonly notificationsService: NotificationsService,
   ) {}
 
-  async findAll(): Promise<Purchase[]> {
-    return this.purchaseRepository.find({
-      relations: { items: true, payments: true },
-      order: { createdAt: 'DESC' },
-    });
+  async findAll(query: PurchaseQueryDto): Promise<PaginatedResponse<Purchase>> {
+    const page = query.page ?? 1;
+    const limit = query.limit ?? 20;
+
+    const qb = this.purchaseRepository
+      .createQueryBuilder('purchase')
+      .leftJoinAndSelect('purchase.items', 'items')
+      .leftJoinAndSelect('purchase.payments', 'payments')
+      .distinct(true)
+      .orderBy('purchase.created_at', 'DESC')
+      .skip((page - 1) * limit)
+      .take(limit);
+
+    if (query.branchId) {
+      qb.andWhere('purchase.branch_id = :branchId', { branchId: query.branchId });
+    }
+    if (query.supplierId) {
+      qb.andWhere('purchase.supplier_id = :supplierId', {
+        supplierId: query.supplierId,
+      });
+    }
+    if (query.status) {
+      qb.andWhere('purchase.status = :status', { status: query.status });
+    }
+    if (query.documentType) {
+      qb.andWhere('purchase.document_type = :documentType', {
+        documentType: query.documentType,
+      });
+    }
+    if (query.from) {
+      qb.andWhere('purchase.created_at >= :from', { from: query.from });
+    }
+    if (query.to) {
+      qb.andWhere('purchase.created_at <= :to', { to: query.to });
+    }
+
+    const [purchases, total] = await qb.getManyAndCount();
+    return toPaginatedResponse(purchases, total, page, limit);
   }
 
   async findOne(id: string): Promise<Purchase> {

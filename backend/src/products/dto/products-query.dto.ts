@@ -1,7 +1,9 @@
 import { ApiPropertyOptional } from '@nestjs/swagger';
 import { IsOptional, IsUUID } from 'class-validator';
 
-export class ProductsQueryDto {
+import { PaginationQueryDto } from '../../common/dto/pagination-query.dto';
+
+export class ProductsQueryDto extends PaginationQueryDto {
   @ApiPropertyOptional({ example: '0f8fad5b-d9cb-469f-a165-70867728950e' })
   @IsOptional()
   @IsUUID()

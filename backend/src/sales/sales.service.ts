@@ -28,7 +28,10 @@ import { computePricing } from './pricing/pricing-engine';
 import { ConvertSaleQuotationDto } from './dto/convert-sale-quotation.dto';
 import { CreateSaleDto } from './dto/create-sale.dto';
 import { RecordSalePaymentDto } from './dto/record-sale-payment.dto';
+import { SalesQueryDto } from './dto/sales-query.dto';
 import { UpdateSaleDto } from './dto/update-sale.dto';
+import { PaginatedResponse } from '../common/interfaces/paginated-response.interface';
+import { toPaginatedResponse } from '../common/utils/pagination.util';
 
 @Injectable()
 export class SalesService {
@@ -261,11 +264,39 @@ export class SalesService {
     });
   }
 
-  async findAll(): Promise<Sale[]> {
-    return this.salesRepository.find({
-      relations: { items: true, payments: true },
-      order: { createdAt: 'DESC' },
-    });
+  async findAll(query: SalesQueryDto): Promise<PaginatedResponse<Sale>> {
+    const page = query.page ?? 1;
+    const limit = query.limit ?? 20;
+
+    const qb = this.salesRepository
+      .createQueryBuilder('sale')
+      .leftJoinAndSelect('sale.items', 'items')
+      .leftJoinAndSelect('sale.payments', 'payments')
+      .distinct(true)
+      .orderBy('sale.created_at', 'DESC')
+      .skip((page - 1) * limit)
+      .take(limit);
+
+    if (query.branchId) {
+      qb.andWhere('sale.branch_id = :branchId', { branchId: query.branchId });
+    }
+    if (query.status) {
+      qb.andWhere('sale.status = :status', { status: query.status });
+    }
+    if (query.documentType) {
+      qb.andWhere('sale.document_type = :documentType', {
+        documentType: query.documentType,
+      });
+    }
+    if (query.from) {
+      qb.andWhere('sale.created_at >= :from', { from: query.from });
+    }
+    if (query.to) {
+      qb.andWhere('sale.created_at <= :to', { to: query.to });
+    }
+
+    const [sales, total] = await qb.getManyAndCount();
+    return toPaginatedResponse(sales, total, page, limit);
   }
 
   async findOne(id: string): Promise<Sale> {

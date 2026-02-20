@@ -13,8 +13,27 @@ services:
       test: ["CMD-SHELL", "pg_isready -U ${DB_USERNAME:-postgres} -d ${DB_NAME:-inventory_pos}"]
       interval: 10s
       timeout: 5s
-      retries: 5
-      start_period: 15s
+      retries: 8
+      start_period: 20s
+
+  migrate:
+    image: postgres:16-alpine
+    container_name: inventory-pos-migrate
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DB_HOST: db
+      DB_PORT: 5432
+      DB_USERNAME: ${DB_USERNAME:-postgres}
+      DB_PASSWORD: ${DB_PASSWORD:-postgres}
+      DB_NAME: ${DB_NAME:-inventory_pos}
+      MIGRATIONS_DIR: /migrations
+    volumes:
+      - ./backend/sql/migrations:/migrations:ro
+      - ./deploy/scripts:/scripts:ro
+    command: ["/bin/sh", "/scripts/apply-migrations.sh"]
+    restart: "no"
 
   backend:
     container_name: inventory-pos-backend
@@ -27,6 +46,8 @@ services:
     depends_on:
       db:
         condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
     env_file:
       - ./backend/.env
     environment:
@@ -36,6 +57,7 @@ services:
       DB_PORT: 5432
       DB_SYNCHRONIZE: "${DB_SYNCHRONIZE:-false}"
       DB_SSL: "${DB_SSL:-false}"
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:8080,http://localhost:3000}
     ports:
       - "${BACKEND_PORT:-3000}:3000"
     healthcheck:
@@ -49,7 +71,22 @@ services:
       interval: 30s
       timeout: 5s
       retries: 5
-      start_period: 25s
+      start_period: 30s
+
+  frontend:
+    container_name: inventory-pos-frontend
+    build:
+      context: .
+      dockerfile: deploy/docker/frontend.Dockerfile
+      args:
+        API_BASE_URL: ${FRONTEND_API_BASE_URL:-/api}
+    image: inventory-pos-frontend:${APP_IMAGE_TAG:-local}
+    restart: unless-stopped
+    depends_on:
+      backend:
+        condition: service_healthy
+    ports:
+      - "${FRONTEND_PORT:-8080}:80"
 
 volumes:
   postgres_data:
