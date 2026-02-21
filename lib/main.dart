@@ -3,15 +3,19 @@ import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:hive_flutter/hive_flutter.dart';
 
-import 'app_config.dart';
 import 'app_routes.dart';
 import 'core/api/api_client.dart';
 import 'features/auth/bloc/auth_bloc.dart';
 import 'features/auth/bloc/auth_event.dart';
 import 'features/auth/bloc/auth_state.dart';
+import 'features/finance_settings/screens/finance_settings_screen.dart';
+import 'features/purchase_operations/screens/purchase_operations_screen.dart';
+import 'features/reporting_dashboard/screens/reporting_dashboard_screen.dart';
 import 'features/roles/bloc/role_bloc.dart';
 import 'features/roles/repository/role_repository.dart';
 import 'features/roles/screens/role_management_screen.dart';
+import 'features/sales_operations/screens/sales_operations_screen.dart';
+import 'features/warehouse_operations/screens/warehouse_operations_screen.dart';
 import 'screens/admin_settings_screen.dart';
 import 'screens/checkout_screen.dart';
 import 'screens/inventory_list_screen.dart';
@@ -22,10 +26,18 @@ import 'screens/sales_return_screen.dart';
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await Hive.initFlutter();
-  try {
-    await dotenv.load(fileName: '.env');
-  } catch (_) {
-    // Fallback to compile-time --dart-define values when .env is absent.
+  final String buildEnv = const String.fromEnvironment(
+    'APP_ENV',
+    defaultValue: 'dev',
+  ).trim().toLowerCase();
+  final List<String> dotenvCandidates = <String>['.env.$buildEnv', '.env'];
+  for (final String file in dotenvCandidates) {
+    try {
+      await dotenv.load(fileName: file);
+      break;
+    } catch (_) {
+      // Try next candidate; compile-time --dart-define values are still supported.
+    }
   }
   runApp(const InventoryPosApp());
 }
@@ -42,7 +54,7 @@ class InventoryPosApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final ColorScheme scheme =
+    final ColorScheme lightScheme =
         ColorScheme.fromSeed(
           seedColor: _primaryBlue,
           brightness: Brightness.light,
@@ -50,6 +62,14 @@ class InventoryPosApp extends StatelessWidget {
           primary: _primaryBlue,
           secondary: _accentGold,
           surface: Colors.white,
+        );
+    final ColorScheme darkScheme =
+        ColorScheme.fromSeed(
+          seedColor: _primaryBlue,
+          brightness: Brightness.dark,
+        ).copyWith(
+          primary: const Color(0xFF90A8FF),
+          secondary: const Color(0xFFF0D784),
         );
 
     return MultiBlocProvider(
@@ -64,7 +84,7 @@ class InventoryPosApp extends StatelessWidget {
         debugShowCheckedModeBanner: false,
         theme: ThemeData(
           useMaterial3: true,
-          colorScheme: scheme,
+          colorScheme: lightScheme,
           scaffoldBackgroundColor: Colors.white,
           appBarTheme: const AppBarTheme(
             backgroundColor: Colors.white,
@@ -85,6 +105,14 @@ class InventoryPosApp extends StatelessWidget {
             fillColor: Colors.white,
           ),
         ),
+        darkTheme: ThemeData(
+          useMaterial3: true,
+          colorScheme: darkScheme,
+          inputDecorationTheme: InputDecorationTheme(
+            border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+          ),
+        ),
+        themeMode: ThemeMode.system,
         initialRoute: AppRoutes.login,
         routes: <String, WidgetBuilder>{
           AppRoutes.login: (BuildContext context) =>
@@ -167,6 +195,92 @@ class InventoryPosApp extends StatelessWidget {
                   return const RoleManagementScreen();
                 },
               ),
+          AppRoutes.salesOps: (BuildContext context) =>
+              BlocBuilder<AuthBloc, AuthState>(
+                builder: (BuildContext context, AuthState authState) {
+                  if (authState.status != AuthStatus.authenticated) {
+                    return LoginPage(apiClient: _apiClient);
+                  }
+                  if (!authState.hasPermission('sales.view')) {
+                    return const _AccessDeniedPage(title: 'Sales Operations');
+                  }
+                  return SalesOperationsScreen(apiClient: _apiClient);
+                },
+              ),
+          AppRoutes.purchaseOps: (BuildContext context) =>
+              BlocBuilder<AuthBloc, AuthState>(
+                builder: (BuildContext context, AuthState authState) {
+                  if (authState.status != AuthStatus.authenticated) {
+                    return LoginPage(apiClient: _apiClient);
+                  }
+                  if (!authState.hasPermission('purchases.read')) {
+                    return const _AccessDeniedPage(
+                      title: 'Purchase Operations',
+                    );
+                  }
+                  return PurchaseOperationsScreen(apiClient: _apiClient);
+                },
+              ),
+          AppRoutes.warehouseOps: (BuildContext context) =>
+              BlocBuilder<AuthBloc, AuthState>(
+                builder: (BuildContext context, AuthState authState) {
+                  if (authState.status != AuthStatus.authenticated) {
+                    return LoginPage(apiClient: _apiClient);
+                  }
+                  if (!authState.hasPermission('warehouses.read')) {
+                    return const _AccessDeniedPage(
+                      title: 'Warehouse Operations',
+                    );
+                  }
+                  return WarehouseOperationsScreen(apiClient: _apiClient);
+                },
+              ),
+          AppRoutes.reportingDashboard: (BuildContext context) =>
+              BlocBuilder<AuthBloc, AuthState>(
+                builder: (BuildContext context, AuthState authState) {
+                  if (authState.status != AuthStatus.authenticated) {
+                    return LoginPage(apiClient: _apiClient);
+                  }
+                  if (!authState.hasPermission('reports.view') &&
+                      !authState.hasPermission('dashboard.view')) {
+                    return const _AccessDeniedPage(
+                      title: 'Reporting Dashboard',
+                    );
+                  }
+                  return ReportingDashboardScreen(apiClient: _apiClient);
+                },
+              ),
+          AppRoutes.financeSettings: (BuildContext context) =>
+              BlocBuilder<AuthBloc, AuthState>(
+                builder: (BuildContext context, AuthState authState) {
+                  if (authState.status != AuthStatus.authenticated) {
+                    return LoginPage(apiClient: _apiClient);
+                  }
+                  if (!authState.hasAnyRole(const <String>[
+                    'admin',
+                    'super_admin',
+                  ])) {
+                    return const _AccessDeniedPage(title: 'Finance Settings');
+                  }
+                  return FinanceSettingsScreen(apiClient: _apiClient);
+                },
+              ),
+          AppRoutes.userAccess: (BuildContext context) =>
+              BlocBuilder<AuthBloc, AuthState>(
+                builder: (BuildContext context, AuthState authState) {
+                  if (authState.status != AuthStatus.authenticated) {
+                    return LoginPage(apiClient: _apiClient);
+                  }
+                  if (!authState.hasPermission('users.read') &&
+                      !authState.hasPermission('roles.read')) {
+                    return const _AccessDeniedPage(title: 'User Access');
+                  }
+                  return FinanceSettingsScreen(
+                    apiClient: _apiClient,
+                    initialTabIndex: 2,
+                  );
+                },
+              ),
         },
         onGenerateRoute: (RouteSettings settings) {
           if (settings.name == AppRoutes.productDetails) {
@@ -235,8 +349,7 @@ class _LoginPageState extends State<LoginPage> {
       final String? accessToken = response['accessToken']?.toString();
       final String? refreshToken = response['refreshToken']?.toString();
       final dynamic userPayload = response['user'];
-      if (
-          accessToken == null ||
+      if (accessToken == null ||
           refreshToken == null ||
           userPayload is! Map<String, dynamic>) {
         throw const ApiException(500, 'Missing token pair or user payload.');
@@ -522,231 +635,6 @@ class ProductDetailsPage extends StatelessWidget {
   }
 }
 
-class CartCheckoutPage extends StatelessWidget {
-  const CartCheckoutPage({super.key});
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(title: const Text('Shopping Cart & Checkout')),
-      body: Center(
-        child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 960),
-          child: Padding(
-            padding: const EdgeInsets.all(16),
-            child: LayoutBuilder(
-              builder: (BuildContext context, BoxConstraints constraints) {
-                final bool stacked = constraints.maxWidth < 760;
-                final Widget order = const _CheckoutOrderPanel();
-                final Widget payment = const _CheckoutPaymentPanel();
-
-                if (stacked) {
-                  return ListView(
-                    children: <Widget>[
-                      order,
-                      const SizedBox(height: 12),
-                      payment,
-                    ],
-                  );
-                }
-                return Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: <Widget>[
-                    Expanded(flex: 7, child: order),
-                    const SizedBox(width: 12),
-                    Expanded(flex: 5, child: payment),
-                  ],
-                );
-              },
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-class _CheckoutOrderPanel extends StatelessWidget {
-  const _CheckoutOrderPanel();
-
-  @override
-  Widget build(BuildContext context) {
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: <Widget>[
-            Text('Order Items', style: Theme.of(context).textTheme.titleMedium),
-            const SizedBox(height: 10),
-            const ListTile(
-              dense: true,
-              title: Text('USB Barcode Scanner'),
-              subtitle: Text('Qty: 1'),
-              trailing: Text('\$49.99'),
-            ),
-            const ListTile(
-              dense: true,
-              title: Text('Thermal Paper Roll'),
-              subtitle: Text('Qty: 3'),
-              trailing: Text('\$15.00'),
-            ),
-            const Divider(),
-            const ListTile(
-              dense: true,
-              title: Text('Subtotal'),
-              trailing: Text('\$64.99'),
-            ),
-            const ListTile(
-              dense: true,
-              title: Text('Tax'),
-              trailing: Text('\$6.50'),
-            ),
-            const ListTile(
-              dense: true,
-              title: Text('Total'),
-              trailing: Text('\$71.49'),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class _CheckoutPaymentPanel extends StatelessWidget {
-  const _CheckoutPaymentPanel();
-
-  @override
-  Widget build(BuildContext context) {
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: <Widget>[
-            Text('Payment', style: Theme.of(context).textTheme.titleMedium),
-            const SizedBox(height: 10),
-            const TextField(
-              decoration: InputDecoration(
-                labelText: 'Customer Name',
-                prefixIcon: Icon(Icons.person_outline),
-              ),
-            ),
-            const SizedBox(height: 10),
-            const TextField(
-              decoration: InputDecoration(
-                labelText: 'Payment Method',
-                prefixIcon: Icon(Icons.payments_outlined),
-              ),
-            ),
-            const SizedBox(height: 16),
-            SizedBox(
-              width: double.infinity,
-              child: FilledButton.icon(
-                onPressed: () {},
-                icon: const Icon(Icons.check_circle_outline),
-                label: const Text('Complete Sale'),
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class SalesHistoryPage extends StatelessWidget {
-  const SalesHistoryPage({super.key});
-
-  @override
-  Widget build(BuildContext context) {
-    final List<SaleRecord> records = List<SaleRecord>.generate(
-      30,
-      (int i) => SaleRecord(
-        invoiceNo: 'INV-${1200 + i}',
-        customerName: i % 3 == 0 ? 'Walk-in' : 'Customer ${i + 1}',
-        total: 39.5 + i * 3.2,
-        date: DateTime.now().subtract(Duration(days: i)),
-      ),
-      growable: false,
-    );
-
-    return Scaffold(
-      appBar: AppBar(title: const Text('Sales History')),
-      body: ListView.separated(
-        padding: const EdgeInsets.all(16),
-        itemCount: records.length,
-        separatorBuilder: (_, __) => const SizedBox(height: 8),
-        itemBuilder: (BuildContext context, int index) {
-          final SaleRecord record = records[index];
-          return Card(
-            child: ListTile(
-              leading: const Icon(Icons.receipt_long_outlined),
-              title: Text(record.invoiceNo),
-              subtitle: Text(
-                '${record.customerName} | ${record.date.toLocal().toString().split(' ').first}',
-              ),
-              trailing: Text('\$${record.total.toStringAsFixed(2)}'),
-            ),
-          );
-        },
-      ),
-    );
-  }
-}
-
-class SettingsPage extends StatefulWidget {
-  const SettingsPage({super.key});
-
-  @override
-  State<SettingsPage> createState() => _SettingsPageState();
-}
-
-class _SettingsPageState extends State<SettingsPage> {
-  bool _notifications = true;
-  bool _compactMode = false;
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(title: const Text('Settings')),
-      body: ListView(
-        padding: const EdgeInsets.all(16),
-        children: <Widget>[
-          Card(
-            child: SwitchListTile(
-              title: const Text('Enable Notifications'),
-              subtitle: const Text('Stock alerts and sales notifications'),
-              value: _notifications,
-              onChanged: (bool value) {
-                setState(() => _notifications = value);
-              },
-            ),
-          ),
-          Card(
-            child: SwitchListTile(
-              title: const Text('Compact Inventory Rows'),
-              subtitle: const Text('Show denser list rows for large catalogs'),
-              value: _compactMode,
-              onChanged: (bool value) {
-                setState(() => _compactMode = value);
-              },
-            ),
-          ),
-          Card(
-            child: ListTile(
-              title: const Text('Backend Base URL'),
-              subtitle: Text(AppConfig.apiBaseUrl),
-              trailing: TextButton(onPressed: () {}, child: const Text('Edit')),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
 class _AccessDeniedPage extends StatelessWidget {
   const _AccessDeniedPage({required this.title});
 
@@ -761,18 +649,4 @@ class _AccessDeniedPage extends StatelessWidget {
       ),
     );
   }
-}
-
-class SaleRecord {
-  const SaleRecord({
-    required this.invoiceNo,
-    required this.customerName,
-    required this.total,
-    required this.date,
-  });
-
-  final String invoiceNo;
-  final String customerName;
-  final double total;
-  final DateTime date;
 }

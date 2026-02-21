@@ -5,11 +5,35 @@ import 'package:flutter_dotenv/flutter_dotenv.dart';
 /// Use `--dart-define` to override defaults at build time, for example:
 /// `--dart-define=API_BASE_URL=https://api.example.com`
 class AppConfig {
+  static const String _buildTimeAppEnv = String.fromEnvironment(
+    'APP_ENV',
+    defaultValue: 'dev',
+  );
+
   /// Raw API base URL from build-time environment.
   static const String _buildTimeApiBaseUrl = String.fromEnvironment(
     'API_BASE_URL',
     defaultValue: 'http://localhost:3000',
   );
+
+  static const String _buildTimeApiKey = String.fromEnvironment(
+    'API_KEY',
+    defaultValue: '',
+  );
+
+  static const String _buildTimeSentryDsn = String.fromEnvironment(
+    'SENTRY_DSN',
+    defaultValue: '',
+  );
+
+  static String get appEnvironment {
+    final String? envValue = _readDotEnv('APP_ENV');
+    final String resolved = (envValue ?? _buildTimeAppEnv).trim().toLowerCase();
+    if (resolved == 'prod' || resolved == 'staging' || resolved == 'dev') {
+      return resolved;
+    }
+    return 'dev';
+  }
 
   static String get apiBaseUrl {
     final String? envValue = _readDotEnv('API_BASE_URL');
@@ -61,6 +85,25 @@ class AppConfig {
     }
 
     return uri;
+  }
+
+  /// Optional static secret/token configured at build/runtime.
+  ///
+  /// This is not used as a replacement for user auth tokens.
+  static String get apiKey {
+    final String? envValue = _readDotEnv('API_KEY');
+    if (envValue != null && envValue.trim().isNotEmpty) {
+      return envValue.trim();
+    }
+    return _buildTimeApiKey;
+  }
+
+  static String get sentryDsn {
+    final String? envValue = _readDotEnv('SENTRY_DSN');
+    if (envValue != null && envValue.trim().isNotEmpty) {
+      return envValue.trim();
+    }
+    return _buildTimeSentryDsn;
   }
 }
 

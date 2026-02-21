@@ -11,4 +11,10 @@ class AppRoutes {
   static const String purchaseReturn = '/purchase-return';
   static const String settings = '/settings';
   static const String roles = '/roles';
+  static const String salesOps = '/sales-operations';
+  static const String purchaseOps = '/purchase-operations';
+  static const String warehouseOps = '/warehouse-operations';
+  static const String reportingDashboard = '/reporting-dashboard';
+  static const String financeSettings = '/finance-settings';
+  static const String userAccess = '/user-access-management';
 }

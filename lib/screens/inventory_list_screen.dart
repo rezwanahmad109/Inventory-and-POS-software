@@ -6,6 +6,7 @@ import 'package:flutter_bloc/flutter_bloc.dart';
 import '../app_routes.dart';
 import '../core/api/api_client.dart';
 import '../core/cache/product_cache_service.dart';
+import '../core/ui/offline_status_banner.dart';
 import '../features/auth/bloc/auth_bloc.dart';
 import '../features/auth/bloc/auth_state.dart';
 
@@ -122,6 +123,75 @@ class _InventoryListScreenState extends State<InventoryListScreen> {
           ),
           BlocBuilder<AuthBloc, AuthState>(
             builder: (BuildContext context, AuthState authState) {
+              final bool canAccessSalesOps = authState.hasPermission(
+                'sales.view',
+              );
+              final bool canAccessPurchaseOps = authState.hasPermission(
+                'purchases.read',
+              );
+              final bool canAccessWarehouseOps = authState.hasPermission(
+                'warehouses.read',
+              );
+              final bool canAccessReports =
+                  authState.hasPermission('reports.view') ||
+                  authState.hasPermission('dashboard.view');
+              final bool canAccessFinanceSettings = authState.hasAnyRole(
+                const <String>['admin', 'super_admin'],
+              );
+              final bool canAccessUserAccess =
+                  authState.hasPermission('users.read') ||
+                  authState.hasPermission('roles.read');
+
+              if (!canAccessSalesOps &&
+                  !canAccessPurchaseOps &&
+                  !canAccessWarehouseOps &&
+                  !canAccessReports &&
+                  !canAccessFinanceSettings &&
+                  !canAccessUserAccess) {
+                return const SizedBox.shrink();
+              }
+
+              return PopupMenuButton<String>(
+                tooltip: 'Operations',
+                icon: const Icon(Icons.dashboard_customize_outlined),
+                onSelected: _navigateToSection,
+                itemBuilder: (_) => <PopupMenuEntry<String>>[
+                  if (canAccessSalesOps)
+                    const PopupMenuItem<String>(
+                      value: AppRoutes.salesOps,
+                      child: Text('Sales Operations'),
+                    ),
+                  if (canAccessPurchaseOps)
+                    const PopupMenuItem<String>(
+                      value: AppRoutes.purchaseOps,
+                      child: Text('Purchase Operations'),
+                    ),
+                  if (canAccessWarehouseOps)
+                    const PopupMenuItem<String>(
+                      value: AppRoutes.warehouseOps,
+                      child: Text('Warehouse Operations'),
+                    ),
+                  if (canAccessReports)
+                    const PopupMenuItem<String>(
+                      value: AppRoutes.reportingDashboard,
+                      child: Text('Reporting Dashboard'),
+                    ),
+                  if (canAccessFinanceSettings)
+                    const PopupMenuItem<String>(
+                      value: AppRoutes.financeSettings,
+                      child: Text('Finance Settings'),
+                    ),
+                  if (canAccessUserAccess)
+                    const PopupMenuItem<String>(
+                      value: AppRoutes.userAccess,
+                      child: Text('User Access'),
+                    ),
+                ],
+              );
+            },
+          ),
+          BlocBuilder<AuthBloc, AuthState>(
+            builder: (BuildContext context, AuthState authState) {
               if (!authState.hasAnyRole(const <String>[
                 'admin',
                 'super_admin',
@@ -152,56 +222,77 @@ class _InventoryListScreenState extends State<InventoryListScreen> {
               'admin',
               'super_admin',
             ]),
+            canAccessSalesOps: authState.hasPermission('sales.view'),
+            canAccessPurchaseOps: authState.hasPermission('purchases.read'),
+            canAccessWarehouseOps: authState.hasPermission('warehouses.read'),
+            canAccessReports:
+                authState.hasPermission('reports.view') ||
+                authState.hasPermission('dashboard.view'),
+            canAccessFinanceSettings: authState.hasAnyRole(const <String>[
+              'admin',
+              'super_admin',
+            ]),
+            canAccessUserAccess:
+                authState.hasPermission('users.read') ||
+                authState.hasPermission('roles.read'),
           );
         },
       ),
       body: SafeArea(
-        child: Column(
-          children: <Widget>[
-            _InventoryToolbar(
-              searchController: _searchController,
-              showLowStockOnly: _showLowStockOnly,
-              onSearchChanged: _onSearchChanged,
-              onToggleLowStock: (bool value) {
-                setState(() => _showLowStockOnly = value);
-              },
-            ),
-            Expanded(
-              child: FutureBuilder<List<Product>>(
-                future: _productsFuture,
-                builder:
-                    (
-                      BuildContext context,
-                      AsyncSnapshot<List<Product>> snapshot,
-                    ) {
-                      if (snapshot.connectionState == ConnectionState.waiting) {
-                        return const Center(child: CircularProgressIndicator());
-                      }
-                      if (snapshot.hasError) {
-                        return _ErrorState(
-                          message: 'Failed to load products.',
-                          onRetry: _refreshProducts,
-                        );
-                      }
-                      final List<Product> products =
-                          snapshot.data ?? <Product>[];
-                      final List<Product> visibleProducts = _showLowStockOnly
-                          ? products.where((Product p) => p.isLowStock).toList()
-                          : products;
-
-                      if (visibleProducts.isEmpty) {
-                        return const _EmptyState();
-                      }
-                      return RefreshIndicator(
-                        onRefresh: _refreshProducts,
-                        child: _ResponsiveProductCollection(
-                          products: visibleProducts,
-                        ),
-                      );
-                    },
+        child: OfflineStatusBanner(
+          apiClient: widget.apiClient,
+          child: Column(
+            children: <Widget>[
+              _InventoryToolbar(
+                searchController: _searchController,
+                showLowStockOnly: _showLowStockOnly,
+                onSearchChanged: _onSearchChanged,
+                onToggleLowStock: (bool value) {
+                  setState(() => _showLowStockOnly = value);
+                },
               ),
-            ),
-          ],
+              Expanded(
+                child: FutureBuilder<List<Product>>(
+                  future: _productsFuture,
+                  builder:
+                      (
+                        BuildContext context,
+                        AsyncSnapshot<List<Product>> snapshot,
+                      ) {
+                        if (snapshot.connectionState ==
+                            ConnectionState.waiting) {
+                          return const Center(
+                            child: CircularProgressIndicator(),
+                          );
+                        }
+                        if (snapshot.hasError) {
+                          return _ErrorState(
+                            message: 'Failed to load products.',
+                            onRetry: _refreshProducts,
+                          );
+                        }
+                        final List<Product> products =
+                            snapshot.data ?? <Product>[];
+                        final List<Product> visibleProducts = _showLowStockOnly
+                            ? products
+                                  .where((Product p) => p.isLowStock)
+                                  .toList()
+                            : products;
+
+                        if (visibleProducts.isEmpty) {
+                          return const _EmptyState();
+                        }
+                        return RefreshIndicator(
+                          onRefresh: _refreshProducts,
+                          child: _ResponsiveProductCollection(
+                            products: visibleProducts,
+                          ),
+                        );
+                      },
+                ),
+              ),
+            ],
+          ),
         ),
       ),
       floatingActionButton: BlocBuilder<AuthBloc, AuthState>(
@@ -275,6 +366,12 @@ class _AppDrawer extends StatelessWidget {
     required this.canCreateSalesReturn,
     required this.canCreatePurchaseReturn,
     required this.canAccessSettings,
+    required this.canAccessSalesOps,
+    required this.canAccessPurchaseOps,
+    required this.canAccessWarehouseOps,
+    required this.canAccessReports,
+    required this.canAccessFinanceSettings,
+    required this.canAccessUserAccess,
   });
 
   final ValueChanged<String> onNavigate;
@@ -282,6 +379,12 @@ class _AppDrawer extends StatelessWidget {
   final bool canCreateSalesReturn;
   final bool canCreatePurchaseReturn;
   final bool canAccessSettings;
+  final bool canAccessSalesOps;
+  final bool canAccessPurchaseOps;
+  final bool canAccessWarehouseOps;
+  final bool canAccessReports;
+  final bool canAccessFinanceSettings;
+  final bool canAccessUserAccess;
 
   @override
   Widget build(BuildContext context) {
@@ -362,6 +465,67 @@ class _AppDrawer extends StatelessWidget {
               onTap: () {
                 Navigator.pop(context);
                 onNavigate(AppRoutes.roles);
+              },
+            ),
+          if (canAccessSalesOps ||
+              canAccessPurchaseOps ||
+              canAccessWarehouseOps ||
+              canAccessReports ||
+              canAccessFinanceSettings ||
+              canAccessUserAccess)
+            const Divider(),
+          if (canAccessSalesOps)
+            ListTile(
+              leading: const Icon(Icons.sell_outlined),
+              title: const Text('Sales Operations'),
+              onTap: () {
+                Navigator.pop(context);
+                onNavigate(AppRoutes.salesOps);
+              },
+            ),
+          if (canAccessPurchaseOps)
+            ListTile(
+              leading: const Icon(Icons.shopping_bag_outlined),
+              title: const Text('Purchase Operations'),
+              onTap: () {
+                Navigator.pop(context);
+                onNavigate(AppRoutes.purchaseOps);
+              },
+            ),
+          if (canAccessWarehouseOps)
+            ListTile(
+              leading: const Icon(Icons.warehouse_outlined),
+              title: const Text('Warehouse Operations'),
+              onTap: () {
+                Navigator.pop(context);
+                onNavigate(AppRoutes.warehouseOps);
+              },
+            ),
+          if (canAccessReports)
+            ListTile(
+              leading: const Icon(Icons.bar_chart_outlined),
+              title: const Text('Reporting Dashboard'),
+              onTap: () {
+                Navigator.pop(context);
+                onNavigate(AppRoutes.reportingDashboard);
+              },
+            ),
+          if (canAccessFinanceSettings)
+            ListTile(
+              leading: const Icon(Icons.account_balance_outlined),
+              title: const Text('Finance Settings'),
+              onTap: () {
+                Navigator.pop(context);
+                onNavigate(AppRoutes.financeSettings);
+              },
+            ),
+          if (canAccessUserAccess)
+            ListTile(
+              leading: const Icon(Icons.supervised_user_circle_outlined),
+              title: const Text('User Access'),
+              onTap: () {
+                Navigator.pop(context);
+                onNavigate(AppRoutes.userAccess);
               },
             ),
         ],
@@ -758,8 +922,8 @@ class InventoryApiService {
         rethrow;
       }
 
-      final List<Map<String, dynamic>> cachedProducts =
-          await _cacheService.readCachedProducts();
+      final List<Map<String, dynamic>> cachedProducts = await _cacheService
+          .readCachedProducts();
       if (cachedProducts.isNotEmpty) {
         return cachedProducts.map(Product.fromJson).toList(growable: false);
       }

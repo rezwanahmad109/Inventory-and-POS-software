@@ -57,6 +57,7 @@ class ApiClient {
 
   Map<String, String> get _headers => <String, String>{
     'Content-Type': 'application/json',
+    if (AppConfig.apiKey.trim().isNotEmpty) 'x-api-key': AppConfig.apiKey.trim(),
     if (_accessToken != null) 'Authorization': 'Bearer $_accessToken',
   };
 
@@ -123,6 +124,28 @@ class ApiClient {
             body: body != null ? jsonEncode(body) : null,
           )
           .timeout(_requestTimeout),
+    );
+    return _handleResponse(response);
+  }
+
+  Future<dynamic> patch(String path, {Map<String, dynamic>? body}) async {
+    final http.Response response = await _requestWithAutoRefresh(
+      path: path,
+      request: () => _client
+          .patch(
+            _uri(path),
+            headers: _headers,
+            body: body != null ? jsonEncode(body) : null,
+          )
+          .timeout(_requestTimeout),
+    );
+    return _handleResponse(response);
+  }
+
+  Future<dynamic> delete(String path) async {
+    final http.Response response = await _requestWithAutoRefresh(
+      path: path,
+      request: () => _client.delete(_uri(path), headers: _headers).timeout(_requestTimeout),
     );
     return _handleResponse(response);
   }
