@@ -17,6 +17,10 @@ export class CreatePurchaseReturnItemDto {
   @IsUUID('4')
   productId!: string;
 
+  @IsOptional()
+  @IsUUID('4')
+  warehouseId?: string;
+
   @IsPositive()
   quantity!: number;
 
@@ -37,7 +41,10 @@ export class CreatePurchaseReturnDto {
   @IsNotEmpty()
   @IsArray()
   @ArrayMinSize(1)
-  @ArrayUnique((item: CreatePurchaseReturnItemDto) => item.productId)
+  @ArrayUnique(
+    (item: CreatePurchaseReturnItemDto) =>
+      `${item.productId}:${item.warehouseId ?? ''}`,
+  )
   @ValidateNested({ each: true })
   @Type(() => CreatePurchaseReturnItemDto)
   items!: CreatePurchaseReturnItemDto[];

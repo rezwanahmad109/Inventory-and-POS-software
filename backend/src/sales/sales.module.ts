@@ -4,8 +4,9 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { BranchesModule } from '../branches/branches.module';
 import { Customer } from '../database/entities/customer.entity';
 import { Product } from '../database/entities/product.entity';
+import { SaleDeliveryItem } from '../database/entities/sale-delivery-item.entity';
+import { SaleDelivery } from '../database/entities/sale-delivery.entity';
 import { Setting } from '../database/entities/setting.entity';
-import { ProductsModule } from '../products/products.module';
 import { NotificationsModule } from '../notifications/notifications.module';
 import { SaleItem } from '../database/entities/sale-item.entity';
 import { SalePayment } from '../database/entities/sale-payment.entity';
@@ -20,11 +21,12 @@ import { SalesService } from './sales.service';
       Sale,
       SaleItem,
       SalePayment,
+      SaleDelivery,
+      SaleDeliveryItem,
       Product,
       Customer,
       Setting,
     ]),
-    ProductsModule,
     BranchesModule,
     NotificationsModule,
   ],

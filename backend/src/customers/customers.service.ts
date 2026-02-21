@@ -39,6 +39,9 @@ export class CustomersService {
       phone: normalizedPhone,
       email: dto.email?.toLowerCase().trim() || null,
       address: dto.address?.trim() || null,
+      creditLimit:
+        dto.creditLimit !== undefined ? Number(dto.creditLimit.toFixed(2)) : null,
+      creditTermsDays: dto.creditTermsDays ?? null,
       totalDue: 0,
       totalDeposit: 0,
     });
@@ -114,6 +117,13 @@ export class CustomersService {
     if (dto.name !== undefined) customer.name = dto.name.trim();
     if (dto.email !== undefined) customer.email = dto.email?.toLowerCase().trim() || null;
     if (dto.address !== undefined) customer.address = dto.address?.trim() || null;
+    if (dto.creditLimit !== undefined) {
+      customer.creditLimit =
+        dto.creditLimit === null ? null : Number(dto.creditLimit.toFixed(2));
+    }
+    if (dto.creditTermsDays !== undefined) {
+      customer.creditTermsDays = dto.creditTermsDays;
+    }
 
     return this.customerRepository.save(customer);
   }

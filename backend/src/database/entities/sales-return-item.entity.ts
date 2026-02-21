@@ -7,6 +7,7 @@ import {
 } from 'typeorm';
 
 import { decimalTransformer } from '../../common/transformers/decimal.transformer';
+import { BranchEntity } from './branch.entity';
 import { Product } from './product.entity';
 import { SalesReturn } from './sales-return.entity';
 
@@ -35,6 +36,13 @@ export class SalesReturnItem {
 
   @Column({ name: 'product_id' })
   productId!: string;
+
+  @Column({ name: 'warehouse_id', type: 'uuid' })
+  warehouseId!: string;
+
+  @ManyToOne(() => BranchEntity, { nullable: false, onDelete: 'RESTRICT' })
+  @JoinColumn({ name: 'warehouse_id' })
+  warehouse!: BranchEntity;
 
   @Column({ type: 'integer' })
   quantity!: number;

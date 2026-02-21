@@ -93,6 +93,11 @@ const PERMISSIONS: PermissionDefinition[] = [
   { module: 'sales', action: 'view', description: 'View sales' },
   { module: 'sales', action: 'update', description: 'Update sale' },
   { module: 'sales', action: 'delete', description: 'Delete sale' },
+  {
+    module: 'sales',
+    action: 'credit_limit_override',
+    description: 'Override customer credit limit while invoicing',
+  },
   { module: 'sales_returns', action: 'create', description: 'Create sales return' },
   { module: 'sales_returns', action: 'read', description: 'Read sales return' },
   { module: 'pos', action: 'access', description: 'Access POS operations' },
@@ -140,6 +145,18 @@ const PERMISSIONS: PermissionDefinition[] = [
   { module: 'reconciliation', action: 'read', description: 'Read reconciliation matches' },
   { module: 'reconciliation', action: 'match', description: 'Match reconciliations' },
   { module: 'finance_reports', action: 'read', description: 'Read finance reports' },
+  {
+    module: 'finance_period_locks',
+    action: 'read',
+    description: 'Read locked accounting periods',
+  },
+  {
+    module: 'finance_period_locks',
+    action: 'lock',
+    description: 'Create or release accounting period locks',
+  },
+  { module: 'outbox', action: 'read', description: 'Read failed outbox events' },
+  { module: 'outbox', action: 'retry', description: 'Retry failed outbox events' },
   { module: 'users', action: 'create', description: 'Create user' },
   { module: 'users', action: 'read', description: 'Read user' },
   { module: 'users', action: 'update', description: 'Update user' },
@@ -231,7 +248,8 @@ const reportPermissionSlugs = PERMISSIONS.filter(
 const financePermissionSlugs = PERMISSIONS.filter((permission) =>
   permission.module.startsWith('finance_') ||
   permission.module === 'wallets' ||
-  permission.module === 'reconciliation',
+  permission.module === 'reconciliation' ||
+  permission.module === 'outbox',
 ).map((permission) => buildSlug(permission.module, permission.action));
 
 const dashboardPermissionSlugs = PERMISSIONS.filter(

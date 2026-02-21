@@ -1,6 +1,6 @@
 import { ApiProperty } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
-import { IsInt, IsNumber, IsUUID, Min } from 'class-validator';
+import { IsInt, IsNumber, IsOptional, IsUUID, Min } from 'class-validator';
 
 export class CreatePurchaseItemDto {
   @ApiProperty({ format: 'uuid' })
@@ -18,4 +18,9 @@ export class CreatePurchaseItemDto {
   @IsNumber({ maxDecimalPlaces: 2 })
   @Min(0)
   unitPrice!: number;
+
+  @ApiProperty({ format: 'uuid', required: false })
+  @IsOptional()
+  @IsUUID()
+  warehouseId?: string;
 }

@@ -30,6 +30,7 @@ import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
 import { RequestUser } from '../common/interfaces/request-user.interface';
 import { ConvertSaleQuotationDto } from './dto/convert-sale-quotation.dto';
+import { CreateSaleDeliveryDto } from './dto/create-sale-delivery.dto';
 import { CreateSaleDto } from './dto/create-sale.dto';
 import { RecordSalePaymentDto } from './dto/record-sale-payment.dto';
 import { SalesQueryDto } from './dto/sales-query.dto';
@@ -118,13 +119,28 @@ export class SalesController {
 
   @Post(':id/convert')
   @Permissions('sales.create')
-  @ApiOperation({ summary: 'Convert quotation to sale invoice' })
+  @ApiOperation({
+    summary: 'Convert delivered quotation quantity to sale invoice (partial supported)',
+  })
   convertQuotation(
     @Param('id', new ParseUUIDPipe()) id: string,
     @Body() convertDto: ConvertSaleQuotationDto,
     @Req() request: AuthenticatedRequest,
   ) {
     return this.salesService.convertQuotationToSale(id, request.user, convertDto);
+  }
+
+  @Post(':id/deliveries')
+  @Permissions('sales.update')
+  @ApiOperation({
+    summary: 'Post sales delivery against a quotation/order (partial supported)',
+  })
+  createDelivery(
+    @Param('id', new ParseUUIDPipe()) id: string,
+    @Body() createDeliveryDto: CreateSaleDeliveryDto,
+    @Req() request: AuthenticatedRequest,
+  ) {
+    return this.salesService.createDelivery(id, createDeliveryDto, request.user);
   }
 
   @Get(':id/pdf')

@@ -5,6 +5,7 @@ import {
   Logger,
   NotFoundException,
 } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
 import {
   EntityManager,
@@ -14,10 +15,12 @@ import {
 
 import { BranchProductDto } from './dto/branch-product.dto';
 import { CreateBranchDto } from './dto/create-branch.dto';
+import { InventoryCostingService } from '../common/services/inventory-costing.service';
 import { QuickStockService } from './quick-stock.service';
 import { StockTransferDto } from './dto/stock-transfer.dto';
 import { UpdateBranchDto } from './dto/update-branch.dto';
 import { TransactionRunnerService } from '../common/services/transaction-runner.service';
+import { getBooleanConfig } from '../common/utils/config.util';
 import { BranchEntity } from '../database/entities/branch.entity';
 import { BranchProductEntity } from '../database/entities/branch-product.entity';
 import { Product } from '../database/entities/product.entity';
@@ -65,6 +68,8 @@ export class BranchesService {
     private readonly stockTransfersRepository: Repository<StockTransferEntity>,
     @InjectRepository(Product)
     private readonly productsRepository: Repository<Product>,
+    private readonly configService: ConfigService,
+    private readonly inventoryCostingService: InventoryCostingService,
     private readonly quickStockService: QuickStockService,
     private readonly transactionRunner: TransactionRunnerService,
   ) {}
@@ -219,7 +224,7 @@ export class BranchesService {
         nextStockQuantity += branchProductDto.adjustBy;
       }
 
-      if (nextStockQuantity < 0) {
+      if (nextStockQuantity < 0 && !this.allowNegativeStock()) {
         throw new BadRequestException(
           `Stock cannot be negative for product "${product.name}" in branch "${branch.name}".`,
         );
@@ -233,7 +238,7 @@ export class BranchesService {
       const delta = nextStockQuantity - previousStockQuantity;
       if (delta !== 0) {
         product.stockQty += delta;
-        if (product.stockQty < 0) {
+        if (product.stockQty < 0 && !this.allowNegativeStock()) {
           throw new BadRequestException(
             `Global stock would become negative for product "${product.name}".`,
           );
@@ -321,6 +326,7 @@ export class BranchesService {
         receivedBy: null,
         cancelledAt: null,
         cancelledBy: null,
+        costSnapshot: null,
       });
 
       const saved = await manager.save(StockTransferEntity, transfer);
@@ -371,6 +377,23 @@ export class BranchesService {
         'stock_transfer_approved',
         false,
       );
+      const consumedLayers = await this.inventoryCostingService.consumeForTransfer(
+        manager,
+        {
+          productId: transfer.productId,
+          warehouseId: transfer.fromBranchId,
+          quantity: transfer.quantity,
+          referenceType: 'stock_transfer_out',
+          referenceId: transfer.id,
+          referenceLineId: null,
+          actorId: approvedBy,
+        },
+      );
+      transfer.costSnapshot = consumedLayers.layers.map((layer) => ({
+        sourceLayerId: layer.sourceLayerId,
+        quantity: layer.quantity,
+        unitCost: layer.unitCost,
+      }));
 
       transfer.status = StockTransferStatus.APPROVED;
       transfer.approvedBy = approvedBy;
@@ -418,6 +441,23 @@ export class BranchesService {
         'stock_transfer_received',
         false,
       );
+      const snapshot =
+        transfer.costSnapshot && transfer.costSnapshot.length > 0
+          ? transfer.costSnapshot
+          : [
+              {
+                sourceLayerId: null,
+                quantity: transfer.quantity,
+                unitCost: Number(product.price),
+              },
+            ];
+      await this.inventoryCostingService.receiveTransfer(manager, {
+        productId: transfer.productId,
+        warehouseId: transfer.toBranchId,
+        sourceId: transfer.id,
+        snapshots: snapshot,
+        actorId: receivedBy,
+      });
 
       transfer.status = StockTransferStatus.RECEIVED;
       transfer.receivedBy = receivedBy;
@@ -581,7 +621,7 @@ export class BranchesService {
 
     const previousStockQuantity = branchProduct.stockQuantity;
     const nextStockQuantity = previousStockQuantity + deltaQuantity;
-    if (nextStockQuantity < 0) {
+    if (nextStockQuantity < 0 && !this.allowNegativeStock()) {
       throw new BadRequestException(
         `Insufficient stock for "${product.name}" in branch "${branch.name}". Available: ${previousStockQuantity}, required: ${Math.abs(deltaQuantity)}.`,
       );
@@ -593,7 +633,7 @@ export class BranchesService {
 
     if (syncGlobalProductStock && deltaQuantity !== 0) {
       product.stockQty += deltaQuantity;
-      if (product.stockQty < 0) {
+      if (product.stockQty < 0 && !this.allowNegativeStock()) {
         throw new BadRequestException(
           `Global stock would become negative for product "${product.name}".`,
         );
@@ -621,6 +661,13 @@ export class BranchesService {
     if (duplicate) {
       throw new ConflictException(`Branch code "${code}" already exists.`);
     }
+  }
+
+  private allowNegativeStock(): boolean {
+    return getBooleanConfig(
+      this.configService.get('ALLOW_NEGATIVE_STOCK'),
+      false,
+    );
   }
 
   private toBranchProductView(branchProduct: BranchProductEntity): BranchProductView {
@@ -672,3 +719,4 @@ export class BranchesService {
     );
   }
 }
+

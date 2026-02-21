@@ -90,6 +90,15 @@ export class FinanceInvoice {
   })
   balanceDue!: number;
 
+  @Column({
+    name: 'invoice_balance',
+    type: 'numeric',
+    precision: 14,
+    scale: 2,
+    transformer: decimalTransformer,
+  })
+  invoiceBalance!: number;
+
   @Column({ length: 3, default: 'USD' })
   currency!: string;
 

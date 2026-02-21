@@ -13,6 +13,7 @@ import { PurchaseStatus } from '../common/enums/purchase-status.enum';
 import { QuotationStatus } from '../common/enums/quotation-status.enum';
 import { RequestUser } from '../common/interfaces/request-user.interface';
 import { AccountingEventBusService } from '../common/services/accounting-event-bus.service';
+import { InventoryCostingService } from '../common/services/inventory-costing.service';
 import { PartyBalanceService } from '../common/services/party-balance.service';
 import { TransactionRunnerService } from '../common/services/transaction-runner.service';
 import { Product } from '../database/entities/product.entity';
@@ -21,7 +22,6 @@ import { PurchasePayment } from '../database/entities/purchase-payment.entity';
 import { Purchase } from '../database/entities/purchase.entity';
 import { Supplier } from '../database/entities/supplier.entity';
 import { NotificationsService } from '../notifications/notifications.service';
-import { ProductsService } from '../products/products.service';
 import { ConvertPurchaseEstimateDto } from './dto/convert-purchase-estimate.dto';
 import { CreatePurchaseDto } from './dto/create-purchase.dto';
 import { PurchaseQueryDto } from './dto/purchase-query.dto';
@@ -39,8 +39,8 @@ export class PurchaseService {
     private readonly purchaseRepository: Repository<Purchase>,
     private readonly accountingEventBus: AccountingEventBusService,
     private readonly transactionRunner: TransactionRunnerService,
+    private readonly inventoryCostingService: InventoryCostingService,
     private readonly partyBalanceService: PartyBalanceService,
-    private readonly productsService: ProductsService,
     private readonly branchesService: BranchesService,
     private readonly notificationsService: NotificationsService,
   ) {}
@@ -255,6 +255,7 @@ export class PurchaseService {
         supplierId: estimate.supplierId,
         items: estimate.items.map((item) => ({
           productId: item.productId,
+          warehouseId: item.warehouseId,
           quantity: item.quantity,
           unitPrice: item.unitPrice,
         })),
@@ -357,7 +358,13 @@ export class PurchaseService {
     }
 
     const productsById = new Map<string, Product>();
-    const lines: Array<{ productId: string; quantity: number; unitPrice: number; total: number }> = [];
+    const lines: Array<{
+      productId: string;
+      warehouseId: string;
+      quantity: number;
+      unitPrice: number;
+      total: number;
+    }> = [];
     let subtotal = 0;
 
     for (const inputItem of dto.items) {
@@ -370,6 +377,14 @@ export class PurchaseService {
         throw new NotFoundException(`Product "${inputItem.productId}" not found.`);
       }
 
+      const resolvedWarehouseId =
+        inputItem.warehouseId ?? branchId ?? product.defaultWarehouseId ?? null;
+      if (!resolvedWarehouseId) {
+        throw new BadRequestException(
+          `Warehouse is required for product "${product.name}" purchase line.`,
+        );
+      }
+
       const unitPrice = Number(inputItem.unitPrice.toFixed(2));
       const total = this.roundMoney(unitPrice * inputItem.quantity);
       subtotal = this.roundMoney(subtotal + total);
@@ -377,6 +392,7 @@ export class PurchaseService {
       productsById.set(product.id, product);
       lines.push({
         productId: product.id,
+        warehouseId: resolvedWarehouseId,
         quantity: inputItem.quantity,
         unitPrice,
         total,
@@ -424,30 +440,36 @@ export class PurchaseService {
       }
 
       if (documentType === PurchaseDocumentType.BILL) {
-        if (branchId) {
-          await this.branchesService.increaseStockInBranch(
-            manager,
-            branchId,
-            product,
-            line.quantity,
-            'purchase',
-          );
-        } else {
-          const previousStockQty = product.stockQty;
-          product.stockQty += line.quantity;
-          await manager.save(Product, product);
-          this.productsService.handleStockLevelChange(product, previousStockQty, 'purchase');
-        }
+        await this.branchesService.increaseStockInBranch(
+          manager,
+          line.warehouseId,
+          product,
+          line.quantity,
+          'purchase',
+        );
       }
 
       const item = manager.create(PurchaseItem, {
         purchaseId: persistedPurchase.id,
         productId: product.id,
+        warehouseId: line.warehouseId,
         quantity: line.quantity,
         unitPrice: line.unitPrice,
         total: line.total,
       });
-      persistedItems.push(await manager.save(PurchaseItem, item));
+      const savedItem = await manager.save(PurchaseItem, item);
+      persistedItems.push(savedItem);
+
+      if (documentType === PurchaseDocumentType.BILL) {
+        await this.inventoryCostingService.createPurchaseLayer(manager, {
+          productId: product.id,
+          warehouseId: line.warehouseId,
+          quantity: line.quantity,
+          unitCost: line.unitPrice,
+          sourceId: persistedPurchase.id,
+          sourceLineId: savedItem.id,
+        });
+      }
     }
 
     const persistedPayments: PurchasePayment[] = [];
@@ -500,30 +522,29 @@ export class PurchaseService {
           throw new NotFoundException(`Product "${item.productId}" not found.`);
         }
 
-        if (!purchase.branchId && product.stockQty < item.quantity) {
+        if (!item.warehouseId) {
           throw new BadRequestException(
-            `Cannot rollback purchase. Product "${product.name}" stock would become negative.`,
+            `Warehouse is required for product "${product.name}" rollback.`,
           );
         }
 
-        if (purchase.branchId) {
-          await this.branchesService.decreaseStockInBranch(
-            manager,
-            purchase.branchId,
-            product,
-            item.quantity,
-            'purchase_delete',
-          );
-        } else {
-          const previousStockQty = product.stockQty;
-          product.stockQty -= item.quantity;
-          await manager.save(Product, product);
-          this.productsService.handleStockLevelChange(
-            product,
-            previousStockQty,
-            'purchase_delete',
-          );
-        }
+        await this.branchesService.decreaseStockInBranch(
+          manager,
+          item.warehouseId,
+          product,
+          item.quantity,
+          'purchase_delete',
+        );
+
+        await this.inventoryCostingService.consumeForPurchaseReturn(manager, {
+          productId: product.id,
+          warehouseId: item.warehouseId,
+          quantity: item.quantity,
+          referenceType: 'purchase_delete',
+          referenceId: purchase.id,
+          referenceLineId: item.id,
+          actorId: null,
+        });
       }
     }
 

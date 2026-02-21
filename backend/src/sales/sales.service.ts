@@ -9,7 +9,8 @@ import { EntityManager, Repository } from 'typeorm';
 
 import { BranchesService } from '../branches/branches.service';
 import { RequestUser } from '../common/interfaces/request-user.interface';
-import { AccountingEventBusService } from '../common/services/accounting-event-bus.service';
+import { InventoryCostingService } from '../common/services/inventory-costing.service';
+import { OutboxService } from '../common/services/outbox.service';
 import { PartyBalanceService } from '../common/services/party-balance.service';
 import { TransactionRunnerService } from '../common/services/transaction-runner.service';
 import { QuotationStatus } from '../common/enums/quotation-status.enum';
@@ -17,21 +18,29 @@ import { SaleDocumentType } from '../common/enums/sale-document-type.enum';
 import { SaleStatus } from '../common/enums/sale-status.enum';
 import { TaxMethod } from '../common/enums/tax-method.enum';
 import { Customer } from '../database/entities/customer.entity';
+import { PeriodLock } from '../database/entities/period-lock.entity';
 import { ProductPriceTierEntity } from '../database/entities/product-price-tier.entity';
 import { Product } from '../database/entities/product.entity';
+import { SaleDeliveryItem } from '../database/entities/sale-delivery-item.entity';
+import { SaleDelivery } from '../database/entities/sale-delivery.entity';
 import { SaleItem } from '../database/entities/sale-item.entity';
 import { SalePayment } from '../database/entities/sale-payment.entity';
 import { Sale } from '../database/entities/sale.entity';
-import { ProductsService } from '../products/products.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { computePricing } from './pricing/pricing-engine';
 import { ConvertSaleQuotationDto } from './dto/convert-sale-quotation.dto';
+import { CreateSaleDeliveryDto } from './dto/create-sale-delivery.dto';
 import { CreateSaleDto } from './dto/create-sale.dto';
 import { RecordSalePaymentDto } from './dto/record-sale-payment.dto';
 import { SalesQueryDto } from './dto/sales-query.dto';
 import { UpdateSaleDto } from './dto/update-sale.dto';
 import { PaginatedResponse } from '../common/interfaces/paginated-response.interface';
 import { toPaginatedResponse } from '../common/utils/pagination.util';
+
+interface PersistSaleOptions {
+  consumeInventoryOnInvoice?: boolean;
+  emitDeliveryOutbox?: boolean;
+}
 
 @Injectable()
 export class SalesService {
@@ -40,12 +49,10 @@ export class SalesService {
   constructor(
     @InjectRepository(Sale)
     private readonly salesRepository: Repository<Sale>,
-    @InjectRepository(SalePayment)
-    private readonly salePaymentsRepository: Repository<SalePayment>,
-    private readonly accountingEventBus: AccountingEventBusService,
+    private readonly outboxService: OutboxService,
+    private readonly inventoryCostingService: InventoryCostingService,
     private readonly transactionRunner: TransactionRunnerService,
     private readonly partyBalanceService: PartyBalanceService,
-    private readonly productsService: ProductsService,
     private readonly branchesService: BranchesService,
     private readonly notificationsService: NotificationsService,
   ) {}
@@ -63,17 +70,6 @@ export class SalesService {
       await this.sendReceiptIfPossible(sale);
     }
 
-    if (sale.documentType === SaleDocumentType.INVOICE) {
-      this.accountingEventBus.publish('sale.invoiced', {
-        saleId: sale.id,
-        invoiceNumber: sale.invoiceNumber,
-        subtotal: sale.subtotal,
-        taxTotal: sale.taxTotal,
-        grandTotal: sale.grandTotal,
-        branchId: sale.branchId,
-        occurredAt: sale.createdAt ?? new Date(),
-      });
-    }
     return sale;
   }
 
@@ -88,9 +84,24 @@ export class SalesService {
 
     return this.transactionRunner.runInTransaction(async (manager) => {
       const sale = await this.getSaleForMutation(manager, id);
+      if (sale.documentType === SaleDocumentType.INVOICE) {
+        throw new BadRequestException(
+          'Posted invoices are immutable. Use delivery return/credit note adjustments.',
+        );
+      }
+
       if (sale.salesReturns.length > 0) {
         throw new BadRequestException(
           'Sales with linked returns cannot be modified.',
+        );
+      }
+      if (
+        sale.items.some(
+          (item) => item.deliveredQuantity > 0 || item.invoicedQuantity > 0,
+        )
+      ) {
+        throw new BadRequestException(
+          'Orders with posted deliveries or invoices cannot be modified.',
         );
       }
 
@@ -110,10 +121,24 @@ export class SalesService {
   async removeInvoice(id: string): Promise<void> {
     await this.transactionRunner.runInTransaction(async (manager) => {
       const sale = await this.getSaleForMutation(manager, id);
+      if (sale.documentType === SaleDocumentType.INVOICE) {
+        throw new BadRequestException(
+          'Posted invoices are immutable. Use delivery return/credit note adjustments.',
+        );
+      }
 
       if (sale.salesReturns.length > 0) {
         throw new BadRequestException(
           'Sales with linked returns cannot be deleted.',
+        );
+      }
+      if (
+        sale.items.some(
+          (item) => item.deliveredQuantity > 0 || item.invoicedQuantity > 0,
+        )
+      ) {
+        throw new BadRequestException(
+          'Orders with posted deliveries or invoices cannot be deleted.',
         );
       }
 
@@ -127,7 +152,10 @@ export class SalesService {
     paymentDto: RecordSalePaymentDto,
     requestUser: RequestUser,
   ): Promise<Sale> {
+    const now = new Date();
     const sale = await this.transactionRunner.runInTransaction(async (manager) => {
+      await this.assertPostingPeriodOpen(manager, now);
+
       const sale = await manager.findOne(Sale, {
         where: { id: saleId },
         lock: { mode: 'pessimistic_write' },
@@ -178,6 +206,20 @@ export class SalesService {
         await this.adjustCustomerDue(manager, sale.customerId, -amount);
       }
 
+      await this.outboxService.enqueue(manager, {
+        eventType: 'sales.payment_received',
+        idempotencyKey: `sales:payment:${payment.id}`,
+        sourceType: 'sale_payment',
+        sourceId: payment.id,
+        payload: {
+          saleId: sale.id,
+          paymentId: payment.id,
+          amount,
+          branchId: sale.branchId,
+          occurredAt: now.toISOString(),
+        },
+      });
+
       return this.findOneWithManager(manager, sale.id);
     });
 
@@ -185,13 +227,168 @@ export class SalesService {
       await this.sendReceiptIfPossible(sale);
     }
 
-    this.accountingEventBus.publish('sale.payment_received', {
-      saleId: sale.id,
-      amount: paymentDto.amount,
-      branchId: sale.branchId,
-      occurredAt: new Date(),
-    });
     return sale;
+  }
+
+  async createDelivery(
+    orderSaleId: string,
+    createDeliveryDto: CreateSaleDeliveryDto,
+    requestUser: RequestUser,
+  ): Promise<SaleDelivery> {
+    const postingDate = createDeliveryDto.deliveryDate
+      ? new Date(createDeliveryDto.deliveryDate)
+      : new Date();
+
+    return this.transactionRunner.runInTransaction(async (manager) => {
+      await this.assertPostingPeriodOpen(manager, postingDate);
+
+      const quotation = await manager.findOne(Sale, {
+        where: { id: orderSaleId },
+        relations: { items: true },
+        lock: { mode: 'pessimistic_write' },
+      });
+      if (!quotation) {
+        throw new NotFoundException(`Sale "${orderSaleId}" not found.`);
+      }
+      if (quotation.documentType !== SaleDocumentType.QUOTATION) {
+        throw new BadRequestException(
+          'Sales deliveries can only be posted against quotation/order documents.',
+        );
+      }
+      if (quotation.quotationStatus === QuotationStatus.CONVERTED) {
+        throw new BadRequestException('Order is already fully invoiced.');
+      }
+
+      const orderItemsById = new Map(
+        (quotation.items ?? []).map((item) => [item.id, item]),
+      );
+      if (orderItemsById.size === 0) {
+        throw new BadRequestException('Order has no lines to deliver.');
+      }
+
+      const delivery = manager.create(SaleDelivery, {
+        deliveryNumber: await this.generateDeliveryNumber(manager),
+        orderSaleId: quotation.id,
+        totalCogs: 0,
+        note: createDeliveryDto.note?.trim() ?? null,
+        createdByUserId: requestUser.userId,
+      });
+      const savedDelivery = await manager.save(SaleDelivery, delivery);
+
+      const persistedDeliveryItems: SaleDeliveryItem[] = [];
+      let totalCogs = 0;
+
+      for (const requestedLine of createDeliveryDto.items) {
+        const orderItem = orderItemsById.get(requestedLine.orderItemId);
+        if (!orderItem) {
+          throw new BadRequestException(
+            `Order line "${requestedLine.orderItemId}" was not found on order ${quotation.invoiceNumber}.`,
+          );
+        }
+
+        const remainingToDeliver = Math.max(
+          orderItem.quantity - orderItem.deliveredQuantity,
+          0,
+        );
+        if (requestedLine.quantity > remainingToDeliver) {
+          throw new BadRequestException(
+            `Delivery quantity ${requestedLine.quantity} exceeds remaining ordered quantity ${remainingToDeliver} for line ${orderItem.id}.`,
+          );
+        }
+        if (!orderItem.warehouseId) {
+          throw new BadRequestException(
+            `Warehouse is required for order line ${orderItem.id}.`,
+          );
+        }
+
+        const product = await manager.findOne(Product, {
+          where: { id: orderItem.productId },
+          lock: { mode: 'pessimistic_write' },
+        });
+        if (!product) {
+          throw new NotFoundException(`Product "${orderItem.productId}" not found.`);
+        }
+
+        await this.branchesService.decreaseStockInBranch(
+          manager,
+          orderItem.warehouseId,
+          product,
+          requestedLine.quantity,
+          'sale_delivery',
+        );
+
+        const costing = await this.inventoryCostingService.consumeForSale(manager, {
+          productId: orderItem.productId,
+          warehouseId: orderItem.warehouseId,
+          quantity: requestedLine.quantity,
+          referenceType: 'sale_delivery',
+          referenceId: savedDelivery.id,
+          referenceLineId: null,
+          actorId: requestUser.userId,
+        });
+
+        const unitCost =
+          requestedLine.quantity > 0
+            ? Number((costing.totalCost / requestedLine.quantity).toFixed(4))
+            : 0;
+
+        const deliveryItem = manager.create(SaleDeliveryItem, {
+          deliveryId: savedDelivery.id,
+          orderItemId: orderItem.id,
+          productId: orderItem.productId,
+          warehouseId: orderItem.warehouseId,
+          quantity: requestedLine.quantity,
+          unitCost,
+          totalCost: costing.totalCost,
+        });
+        persistedDeliveryItems.push(await manager.save(SaleDeliveryItem, deliveryItem));
+
+        orderItem.deliveredQuantity += requestedLine.quantity;
+        if (orderItem.deliveredQuantity > orderItem.quantity) {
+          throw new BadRequestException(
+            `Delivered quantity cannot exceed ordered quantity for line ${orderItem.id}.`,
+          );
+        }
+        if (orderItem.invoicedQuantity > orderItem.deliveredQuantity) {
+          throw new BadRequestException(
+            `Invoiced quantity cannot exceed delivered quantity for line ${orderItem.id}.`,
+          );
+        }
+        await manager.save(SaleItem, orderItem);
+
+        totalCogs = this.roundMoney(totalCogs + costing.totalCost);
+      }
+
+      savedDelivery.totalCogs = totalCogs;
+      await manager.save(SaleDelivery, savedDelivery);
+
+      await this.syncQuotationConversionStatus(manager, quotation, postingDate, null);
+
+      await this.outboxService.enqueue(manager, {
+        eventType: 'sales.delivery_posted',
+        idempotencyKey: `sales:delivery:${savedDelivery.id}`,
+        sourceType: 'sale_delivery',
+        sourceId: savedDelivery.id,
+        payload: {
+          saleId: quotation.id,
+          deliveryId: savedDelivery.id,
+          deliveryNumber: savedDelivery.deliveryNumber,
+          cogsTotal: totalCogs,
+          branchId: quotation.branchId,
+          occurredAt: postingDate.toISOString(),
+        },
+      });
+
+      const reloaded = await manager.findOne(SaleDelivery, {
+        where: { id: savedDelivery.id },
+        relations: { items: true },
+      });
+      if (!reloaded) {
+        throw new NotFoundException('Saved delivery could not be reloaded.');
+      }
+      reloaded.items = persistedDeliveryItems;
+      return reloaded;
+    });
   }
 
   async convertQuotationToSale(
@@ -214,8 +411,96 @@ export class SalesService {
         throw new BadRequestException('Only quotations can be converted to invoices.');
       }
 
-      if (quotation.quotationStatus === QuotationStatus.CONVERTED) {
-        throw new BadRequestException('Quotation is already converted.');
+      if (!quotation.items || quotation.items.length === 0) {
+        throw new BadRequestException('Quotation has no lines to convert.');
+      }
+
+      const quotationItems = quotation.items;
+      const availableDeliveredToInvoice = quotationItems
+        .map((item) => ({
+          item,
+          available: Math.max(item.deliveredQuantity - item.invoicedQuantity, 0),
+        }))
+        .filter((row) => row.available > 0);
+
+      let fallbackLegacyFulfillment = false;
+      const selectedRows: Array<{ item: SaleItem; quantity: number }> = [];
+
+      if (convertDto.items && convertDto.items.length > 0) {
+        const mergedByOrderLine = new Map<string, number>();
+        const orderItemById = new Map<string, SaleItem>();
+
+        for (const input of convertDto.items) {
+          const candidates = quotationItems.filter((item) => {
+            if (input.orderItemId) {
+              return item.id === input.orderItemId;
+            }
+            if (input.productId) {
+              return item.productId === input.productId;
+            }
+            return false;
+          });
+
+          if (candidates.length === 0) {
+            throw new BadRequestException(
+              'Each conversion line must match an order item by orderItemId or productId.',
+            );
+          }
+          if (candidates.length > 1) {
+            throw new BadRequestException(
+              `Product ${input.productId} appears in multiple order lines. Use orderItemId instead.`,
+            );
+          }
+
+          const orderItem = candidates[0];
+          orderItemById.set(orderItem.id, orderItem);
+          mergedByOrderLine.set(
+            orderItem.id,
+            (mergedByOrderLine.get(orderItem.id) ?? 0) + input.quantity,
+          );
+        }
+
+        for (const [orderItemId, requestedQty] of mergedByOrderLine.entries()) {
+          const orderItem = orderItemById.get(orderItemId);
+          if (!orderItem) {
+            throw new NotFoundException(`Order line "${orderItemId}" not found.`);
+          }
+
+          const available = Math.max(
+            orderItem.deliveredQuantity - orderItem.invoicedQuantity,
+            0,
+          );
+          if (requestedQty > available) {
+            throw new BadRequestException(
+              `Invoice quantity ${requestedQty} exceeds delivered and uninvoiced quantity ${available} for order line ${orderItem.id}.`,
+            );
+          }
+
+          selectedRows.push({
+            item: orderItem,
+            quantity: requestedQty,
+          });
+        }
+      } else if (availableDeliveredToInvoice.length > 0) {
+        for (const row of availableDeliveredToInvoice) {
+          selectedRows.push({ item: row.item, quantity: row.available });
+        }
+      } else {
+        const outstandingOrderedRows = quotationItems
+          .map((item) => ({
+            item,
+            available: Math.max(item.quantity - item.invoicedQuantity, 0),
+          }))
+          .filter((row) => row.available > 0);
+
+        if (outstandingOrderedRows.length === 0) {
+          throw new BadRequestException('Quotation is already fully invoiced.');
+        }
+
+        fallbackLegacyFulfillment = true;
+        for (const row of outstandingOrderedRows) {
+          selectedRows.push({ item: row.item, quantity: row.available });
+        }
       }
 
       const createDto: CreateSaleDto = {
@@ -232,12 +517,13 @@ export class SalesService {
                 method: quotation.invoiceTaxMethod,
               }
             : undefined,
-        items: quotation.items.map((item) => ({
-          productId: item.productId,
-          quantity: item.quantity,
-          unitPriceOverride: item.unitPrice,
-          lineDiscountType: item.lineDiscountType,
-          lineDiscountValue: item.lineDiscountValue,
+        items: selectedRows.map((row) => ({
+          productId: row.item.productId,
+          warehouseId: row.item.warehouseId,
+          quantity: row.quantity,
+          unitPriceOverride: row.item.unitPrice,
+          lineDiscountType: row.item.lineDiscountType,
+          lineDiscountValue: row.item.lineDiscountValue,
         })),
         payments: [],
         notes: convertDto.note?.trim() ?? quotation.notes ?? undefined,
@@ -248,14 +534,42 @@ export class SalesService {
         manager,
         createDto,
         requestUser,
+        undefined,
+        {
+          consumeInventoryOnInvoice: fallbackLegacyFulfillment,
+          emitDeliveryOutbox: fallbackLegacyFulfillment,
+        },
       );
 
-      quotation.quotationStatus = QuotationStatus.CONVERTED;
-      quotation.convertedAt = convertDto.conversionDate
+      for (const row of selectedRows) {
+        if (fallbackLegacyFulfillment) {
+          row.item.deliveredQuantity += row.quantity;
+        }
+        row.item.invoicedQuantity += row.quantity;
+
+        if (row.item.deliveredQuantity > row.item.quantity) {
+          throw new BadRequestException(
+            `Delivered quantity cannot exceed ordered quantity for line ${row.item.id}.`,
+          );
+        }
+        if (row.item.invoicedQuantity > row.item.deliveredQuantity) {
+          throw new BadRequestException(
+            `Invoiced quantity cannot exceed delivered quantity for line ${row.item.id}.`,
+          );
+        }
+
+        await manager.save(SaleItem, row.item);
+      }
+
+      const conversionDate = convertDto.conversionDate
         ? new Date(convertDto.conversionDate)
         : new Date();
-      quotation.convertedToSaleId = convertedSale.id;
-      await manager.save(Sale, quotation);
+      await this.syncQuotationConversionStatus(
+        manager,
+        quotation,
+        conversionDate,
+        convertedSale.id,
+      );
 
       return {
         quotation,
@@ -272,6 +586,7 @@ export class SalesService {
       .createQueryBuilder('sale')
       .leftJoinAndSelect('sale.items', 'items')
       .leftJoinAndSelect('sale.payments', 'payments')
+      .leftJoinAndSelect('sale.customerEntity', 'customerEntity')
       .distinct(true)
       .orderBy('sale.created_at', 'DESC')
       .skip((page - 1) * limit)
@@ -296,7 +611,12 @@ export class SalesService {
     }
 
     const [sales, total] = await qb.getManyAndCount();
-    return toPaginatedResponse(sales, total, page, limit);
+    return toPaginatedResponse(
+      sales.map((sale) => this.decorateOverdueFlags(sale)),
+      total,
+      page,
+      limit,
+    );
   }
 
   async findOne(id: string): Promise<Sale> {
@@ -309,12 +629,12 @@ export class SalesService {
   ): Promise<Sale> {
     const sale = await manager.findOne(Sale, {
       where: { id },
-      relations: { items: true, payments: true },
+      relations: { items: true, payments: true, customerEntity: true },
     });
     if (!sale) {
       throw new NotFoundException(`Sale "${id}" not found.`);
     }
-    return sale;
+    return this.decorateOverdueFlags(sale);
   }
 
   private async persistSaleDocument(
@@ -322,6 +642,7 @@ export class SalesService {
     createSaleDto: CreateSaleDto,
     requestUser: RequestUser,
     existingSale?: Sale,
+    options?: PersistSaleOptions,
   ): Promise<Sale> {
     if (createSaleDto.items.length === 0) {
       throw new BadRequestException('At least one item is required.');
@@ -331,6 +652,14 @@ export class SalesService {
       createSaleDto.documentType ??
       existingSale?.documentType ??
       SaleDocumentType.INVOICE;
+    const consumeInventoryOnInvoice =
+      documentType === SaleDocumentType.INVOICE
+        ? (options?.consumeInventoryOnInvoice ?? true)
+        : false;
+    const emitDeliveryOutbox =
+      documentType === SaleDocumentType.INVOICE
+        ? (options?.emitDeliveryOutbox ?? consumeInventoryOnInvoice)
+        : false;
     const branchId =
       createSaleDto.branchId === undefined
         ? (existingSale?.branchId ?? null)
@@ -343,6 +672,9 @@ export class SalesService {
           `Branch "${branch.name}" is inactive. Sales cannot be posted to this branch.`,
         );
       }
+    }
+    if (documentType === SaleDocumentType.INVOICE) {
+      await this.assertPostingPeriodOpen(manager, new Date());
     }
 
     const customer = await this.resolveCustomer(manager, createSaleDto.customerId);
@@ -365,6 +697,7 @@ export class SalesService {
     const linePriceTierMeta: Array<{
       priceTierId: string | null;
       priceTierName: string | null;
+      warehouseId: string | null;
     }> = [];
     const pricingInput: Array<{
       productId: string;
@@ -386,13 +719,11 @@ export class SalesService {
         throw new NotFoundException(`Product "${item.productId}" not found.`);
       }
 
-      if (
-        documentType === SaleDocumentType.INVOICE &&
-        !branchId &&
-        product.stockQty < item.quantity
-      ) {
+      const resolvedWarehouseId =
+        item.warehouseId ?? branchId ?? product.defaultWarehouseId ?? null;
+      if (!resolvedWarehouseId) {
         throw new BadRequestException(
-          `Insufficient stock for "${product.name}". Available: ${product.stockQty}, requested: ${item.quantity}.`,
+          `Warehouse is required for product "${product.name}" delivery line.`,
         );
       }
 
@@ -437,6 +768,7 @@ export class SalesService {
       linePriceTierMeta.push({
         priceTierId: resolvedPriceTierId,
         priceTierName: resolvedPriceTierName,
+        warehouseId: resolvedWarehouseId,
       });
     }
 
@@ -468,6 +800,10 @@ export class SalesService {
         `Paid amount (${paidTotal}) cannot exceed invoice total (${grandTotal}).`,
       );
     }
+    const dueTotal = this.roundMoney(Math.max(grandTotal - paidTotal, 0));
+    if (documentType === SaleDocumentType.INVOICE) {
+      this.assertCreditLimit(customer, dueTotal, requestUser);
+    }
 
     sale.customer = createSaleDto.customer?.trim() ?? customer?.name ?? null;
     sale.customerEntity = customer;
@@ -493,7 +829,7 @@ export class SalesService {
     sale.invoiceTaxMethod = pricing.invoiceTaxOverride?.method ?? null;
 
     sale.paidTotal = paidTotal;
-    sale.dueTotal = this.roundMoney(Math.max(grandTotal - paidTotal, 0));
+    sale.dueTotal = dueTotal;
     sale.paidAmount = sale.paidTotal;
     sale.dueAmount = sale.dueTotal;
 
@@ -522,6 +858,7 @@ export class SalesService {
     const persistedSale = await manager.save(Sale, sale);
 
     const persistedItems: SaleItem[] = [];
+    let totalCogs = 0;
     for (let index = 0; index < pricing.lines.length; index += 1) {
       const line = pricing.lines[index];
       const product = productsById.get(line.productId);
@@ -531,29 +868,34 @@ export class SalesService {
       const tierMeta = linePriceTierMeta[index] ?? {
         priceTierId: null,
         priceTierName: null,
+        warehouseId: null,
       };
 
-      if (documentType === SaleDocumentType.INVOICE) {
-        if (branchId) {
-          await this.branchesService.decreaseStockInBranch(
-            manager,
-            branchId,
-            product,
-            line.quantity,
-            'sale',
+      if (documentType === SaleDocumentType.INVOICE && consumeInventoryOnInvoice) {
+        if (!tierMeta.warehouseId) {
+          throw new BadRequestException(
+            `Warehouse is required for product "${product.name}" delivery line.`,
           );
-        } else {
-          const previousStockQty = product.stockQty;
-          product.stockQty -= line.quantity;
-          await manager.save(Product, product);
-          this.productsService.handleStockLevelChange(product, previousStockQty, 'sale');
         }
+        const warehouseId = tierMeta.warehouseId;
+        await this.branchesService.decreaseStockInBranch(
+          manager,
+          warehouseId,
+          product,
+          line.quantity,
+          'sale_delivery',
+        );
       }
 
       const saleItem = manager.create(SaleItem, {
         saleId: persistedSale.id,
         productId: product.id,
+        warehouseId: tierMeta.warehouseId as string,
         quantity: line.quantity,
+        deliveredQuantity:
+          documentType === SaleDocumentType.INVOICE ? line.quantity : 0,
+        invoicedQuantity:
+          documentType === SaleDocumentType.INVOICE ? line.quantity : 0,
         unitPrice: line.unitPrice,
         priceTierId: tierMeta.priceTierId,
         priceTierName: tierMeta.priceTierName,
@@ -565,7 +907,25 @@ export class SalesService {
         lineTotal: line.lineTotal,
       });
 
-      persistedItems.push(await manager.save(SaleItem, saleItem));
+      const savedItem = await manager.save(SaleItem, saleItem);
+      persistedItems.push(savedItem);
+
+      if (
+        documentType === SaleDocumentType.INVOICE &&
+        consumeInventoryOnInvoice &&
+        tierMeta.warehouseId
+      ) {
+        const costing = await this.inventoryCostingService.consumeForSale(manager, {
+          productId: product.id,
+          warehouseId: tierMeta.warehouseId,
+          quantity: line.quantity,
+          referenceType: 'sale_delivery',
+          referenceId: persistedSale.id,
+          referenceLineId: savedItem.id,
+          actorId: requestUser.userId,
+        });
+        totalCogs = this.roundMoney(totalCogs + costing.totalCost);
+      }
     }
 
     const persistedPayments: SalePayment[] = [];
@@ -585,9 +945,61 @@ export class SalesService {
       await this.adjustCustomerDue(manager, persistedSale.customerId, persistedSale.dueTotal);
     }
 
+    if (documentType === SaleDocumentType.INVOICE) {
+      const occurredAt = (persistedSale.createdAt ?? new Date()).toISOString();
+
+      await this.outboxService.enqueue(manager, {
+        eventType: 'sales.invoice_issued',
+        idempotencyKey: `sales:invoice:${persistedSale.id}`,
+        sourceType: 'sale',
+        sourceId: persistedSale.id,
+        payload: {
+          saleId: persistedSale.id,
+          invoiceNumber: persistedSale.invoiceNumber,
+          subtotal: persistedSale.subtotal,
+          taxTotal: persistedSale.taxTotal,
+          grandTotal: persistedSale.grandTotal,
+          branchId: persistedSale.branchId,
+          occurredAt,
+        },
+      });
+
+      if (emitDeliveryOutbox) {
+        await this.outboxService.enqueue(manager, {
+          eventType: 'sales.delivery_posted',
+          idempotencyKey: `sales:delivery:${persistedSale.id}`,
+          sourceType: 'sale_delivery',
+          sourceId: persistedSale.id,
+          payload: {
+            saleId: persistedSale.id,
+            invoiceNumber: persistedSale.invoiceNumber,
+            cogsTotal: totalCogs,
+            branchId: persistedSale.branchId,
+            occurredAt,
+          },
+        });
+      }
+
+      for (const payment of persistedPayments) {
+        await this.outboxService.enqueue(manager, {
+          eventType: 'sales.payment_received',
+          idempotencyKey: `sales:payment:${payment.id}`,
+          sourceType: 'sale_payment',
+          sourceId: payment.id,
+          payload: {
+            saleId: persistedSale.id,
+            paymentId: payment.id,
+            amount: payment.amount,
+            branchId: persistedSale.branchId,
+            occurredAt,
+          },
+        });
+      }
+    }
+
     const createdSale = await manager.findOne(Sale, {
       where: { id: persistedSale.id },
-      relations: { items: true, payments: true },
+      relations: { items: true, payments: true, customerEntity: true },
     });
 
     if (!createdSale) {
@@ -596,7 +1008,7 @@ export class SalesService {
 
     createdSale.items = persistedItems;
     createdSale.payments = persistedPayments;
-    return createdSale;
+    return this.decorateOverdueFlags(createdSale);
   }
 
   private async resolveCustomer(
@@ -609,6 +1021,7 @@ export class SalesService {
 
     const customer = await manager.findOne(Customer, {
       where: { id: customerId },
+      lock: { mode: 'pessimistic_write' },
     });
     if (!customer) {
       throw new NotFoundException(`Customer #${customerId} not found.`);
@@ -625,6 +1038,66 @@ export class SalesService {
       manager,
       customerId,
       amountDelta,
+    );
+  }
+
+  private assertCreditLimit(
+    customer: Customer | null,
+    dueAmount: number,
+    requestUser: RequestUser,
+  ): void {
+    if (!customer || customer.creditLimit === null || dueAmount <= 0) {
+      return;
+    }
+
+    const projectedAr = this.roundMoney(Number(customer.totalDue) + dueAmount);
+    if (projectedAr <= customer.creditLimit) {
+      return;
+    }
+
+    if (this.canOverrideCreditLimit(requestUser)) {
+      return;
+    }
+
+    throw new BadRequestException(
+      `Credit limit exceeded for customer "${customer.name}". Projected AR ${projectedAr} exceeds limit ${customer.creditLimit}.`,
+    );
+  }
+
+  private canOverrideCreditLimit(requestUser: RequestUser): boolean {
+    const normalizedRoles = new Set(
+      [
+        ...(requestUser.role ? [requestUser.role] : []),
+        ...(requestUser.roles ?? []),
+      ]
+        .map((role) => role.toLowerCase().trim())
+        .filter((role) => role.length > 0),
+    );
+
+    if (normalizedRoles.has('super_admin') || normalizedRoles.has('admin')) {
+      return true;
+    }
+
+    return (requestUser.permissions ?? []).includes('sales.credit_limit_override');
+  }
+
+  private async assertPostingPeriodOpen(
+    manager: EntityManager,
+    postingDate: Date,
+  ): Promise<void> {
+    const activeLock = await manager
+      .createQueryBuilder(PeriodLock, 'period')
+      .where('period.is_locked = TRUE')
+      .andWhere('period.start_date <= :postingDate', { postingDate })
+      .andWhere('period.end_date >= :postingDate', { postingDate })
+      .getOne();
+
+    if (!activeLock) {
+      return;
+    }
+
+    throw new BadRequestException(
+      `Posting date ${postingDate.toISOString().slice(0, 10)} is inside a locked accounting period.`,
     );
   }
 
@@ -661,24 +1134,19 @@ export class SalesService {
           throw new NotFoundException(`Product "${item.productId}" not found.`);
         }
 
-        if (sale.branchId) {
-          await this.branchesService.increaseStockInBranch(
-            manager,
-            sale.branchId,
-            product,
-            item.quantity,
-            'sale_delete',
-          );
-        } else {
-          const previousStockQty = product.stockQty;
-          product.stockQty += item.quantity;
-          await manager.save(Product, product);
-          this.productsService.handleStockLevelChange(
-            product,
-            previousStockQty,
-            'sale_delete',
+        if (!item.warehouseId) {
+          throw new BadRequestException(
+            `Warehouse is required for product "${product.name}" rollback.`,
           );
         }
+
+        await this.branchesService.increaseStockInBranch(
+          manager,
+          item.warehouseId,
+          product,
+          item.quantity,
+          'sale_delete',
+        );
       }
     }
 
@@ -714,6 +1182,98 @@ export class SalesService {
       return SaleStatus.PARTIAL;
     }
     return SaleStatus.UNPAID;
+  }
+
+  private async syncQuotationConversionStatus(
+    manager: EntityManager,
+    quotation: Sale,
+    conversionDate: Date,
+    latestInvoiceId: string | null,
+  ): Promise<void> {
+    if (quotation.documentType !== SaleDocumentType.QUOTATION) {
+      return;
+    }
+
+    const items =
+      quotation.items && quotation.items.length > 0
+        ? quotation.items
+        : await manager.find(SaleItem, {
+            where: { saleId: quotation.id },
+          });
+
+    const fullyInvoiced =
+      items.length > 0 &&
+      items.every((item) => item.invoicedQuantity >= item.quantity);
+
+    if (fullyInvoiced) {
+      quotation.quotationStatus = QuotationStatus.CONVERTED;
+      quotation.convertedAt = conversionDate;
+      if (latestInvoiceId) {
+        quotation.convertedToSaleId = latestInvoiceId;
+      }
+    } else {
+      quotation.quotationStatus = this.resolveQuotationStatus(
+        quotation.validUntil,
+        QuotationStatus.ACTIVE,
+      );
+    }
+
+    await manager.save(Sale, quotation);
+  }
+
+  private decorateOverdueFlags(sale: Sale): Sale {
+    const termsDays = sale.customerEntity?.creditTermsDays ?? null;
+    if (
+      sale.documentType !== SaleDocumentType.INVOICE ||
+      sale.dueTotal <= 0 ||
+      !termsDays ||
+      termsDays <= 0
+    ) {
+      return Object.assign(sale, {
+        isOverdue: false,
+        overdueDays: 0,
+        creditDueDate: null,
+      }) as Sale;
+    }
+
+    const creditDueDate = new Date(sale.createdAt);
+    creditDueDate.setDate(creditDueDate.getDate() + termsDays);
+
+    const overdueDays = Math.max(
+      Math.floor((Date.now() - creditDueDate.getTime()) / (1000 * 60 * 60 * 24)),
+      0,
+    );
+
+    return Object.assign(sale, {
+      isOverdue: overdueDays > 0,
+      overdueDays,
+      creditDueDate: creditDueDate.toISOString().slice(0, 10),
+    }) as Sale;
+  }
+
+  private async generateDeliveryNumber(manager: EntityManager): Promise<string> {
+    for (let attempt = 0; attempt < 5; attempt += 1) {
+      const now = new Date();
+      const year = now.getFullYear().toString().slice(-2);
+      const month = String(now.getMonth() + 1).padStart(2, '0');
+      const day = String(now.getDate()).padStart(2, '0');
+      const hour = String(now.getHours()).padStart(2, '0');
+      const minute = String(now.getMinutes()).padStart(2, '0');
+      const second = String(now.getSeconds()).padStart(2, '0');
+      const random = String(Math.floor(Math.random() * 900) + 100);
+      const candidate = `DLV-${year}${month}${day}-${hour}${minute}${second}-${random}`;
+
+      const exists = await manager.exists(SaleDelivery, {
+        where: { deliveryNumber: candidate },
+      });
+      if (!exists) {
+        return candidate;
+      }
+    }
+
+    throw new BadRequestException(
+      'Unable to allocate a unique delivery number. Please retry.',
+    );
   }
 
   private async generateInvoiceNumber(

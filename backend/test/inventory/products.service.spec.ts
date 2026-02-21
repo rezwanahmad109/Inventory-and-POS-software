@@ -14,6 +14,7 @@ describe('ProductsService low-stock threshold boundary', () => {
     {} as Repository<any>,
     {} as Repository<any>,
     {} as Repository<any>,
+    { get: jest.fn().mockReturnValue('false') } as any,
     {} as any,
   );
 

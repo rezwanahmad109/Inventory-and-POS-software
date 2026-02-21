@@ -5,6 +5,7 @@ import {
   NotFoundException,
   BadRequestException,
 } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
 import { In, Repository, SelectQueryBuilder } from 'typeorm';
 
@@ -29,6 +30,7 @@ import { StockAdjustmentDto } from './dto/stock-adjustment.dto';
 import { UpdateProductDto } from './dto/update-product.dto';
 import { PaginatedResponse } from '../common/interfaces/paginated-response.interface';
 import { toPaginatedResponse } from '../common/utils/pagination.util';
+import { getBooleanConfig } from '../common/utils/config.util';
 
 export type ProductView = Product & {
   stockValue: number;
@@ -79,6 +81,7 @@ export class ProductsService {
     private readonly stockLedgerRepository: Repository<StockLedgerEntry>,
     @InjectRepository(AuditLog)
     private readonly auditLogRepository: Repository<AuditLog>,
+    private readonly configService: ConfigService,
     private readonly transactionRunner: TransactionRunnerService,
   ) {}
 
@@ -549,7 +552,7 @@ export class ProductsService {
 
       const previousStockQty = product.stockQty;
       const nextStockQty = previousStockQty + dto.qtyDelta;
-      if (nextStockQty < 0) {
+      if (nextStockQty < 0 && !this.allowNegativeStock()) {
         throw new BadRequestException(
           `Stock adjustment would make stock negative for "${product.name}".`,
         );
@@ -1013,5 +1016,12 @@ export class ProductsService {
     } catch {
       return undefined;
     }
+  }
+
+  private allowNegativeStock(): boolean {
+    return getBooleanConfig(
+      this.configService.get('ALLOW_NEGATIVE_STOCK'),
+      false,
+    );
   }
 }

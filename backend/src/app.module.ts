@@ -28,11 +28,15 @@ import { FinanceInvoice } from './database/entities/finance-invoice.entity';
 import { FinanceParty } from './database/entities/finance-party.entity';
 import { FinancePayment } from './database/entities/finance-payment.entity';
 import { IdempotencyKey } from './database/entities/idempotency-key.entity';
+import { InventoryCostLayer } from './database/entities/inventory-cost-layer.entity';
+import { InventoryMovement } from './database/entities/inventory-movement.entity';
 import { InvoiceSequence } from './database/entities/invoice-sequence.entity';
 import { JournalEntry, JournalLine } from './database/entities/journal-entry.entity';
+import { OutboxEvent } from './database/entities/outbox-event.entity';
 import { Payment } from './database/entities/payment.entity';
 import { PaymentAllocation } from './database/entities/payment-allocation.entity';
 import { Permission } from './database/entities/permission.entity';
+import { PeriodLock } from './database/entities/period-lock.entity';
 import { PriceTierEntity } from './database/entities/price-tier.entity';
 import { PosOrder } from './database/entities/pos-order.entity';
 import { ProductPriceTierEntity } from './database/entities/product-price-tier.entity';
@@ -45,6 +49,8 @@ import { Purchase } from './database/entities/purchase.entity';
 import { ReconciliationMatch } from './database/entities/reconciliation-match.entity';
 import { Role } from './database/entities/role.entity';
 import { RolePermission } from './database/entities/role-permission.entity';
+import { SaleDeliveryItem } from './database/entities/sale-delivery-item.entity';
+import { SaleDelivery } from './database/entities/sale-delivery.entity';
 import { SaleItem } from './database/entities/sale-item.entity';
 import { SalePayment } from './database/entities/sale-payment.entity';
 import { Sale } from './database/entities/sale.entity';
@@ -84,9 +90,12 @@ import { UsersModule } from './users/users.module';
 import { WarehousesModule } from './warehouses/warehouses.module';
 import { WalletTransaction } from './database/entities/wallet-transaction.entity';
 import { Wallet } from './database/entities/wallet.entity';
+import { getBooleanConfig } from './common/utils/config.util';
 import { configValidationSchema } from './config/config.validation';
+import { HealthController } from './health.controller';
 
 @Module({
+  controllers: [HealthController],
   imports: [
     ConfigModule.forRoot({
       isGlobal: true,
@@ -109,8 +118,10 @@ import { configValidationSchema } from './config/config.validation';
     TypeOrmModule.forRootAsync({
       inject: [ConfigService],
       useFactory: (configService: ConfigService) => {
-        const synchronize =
-          configService.get<string>('DB_SYNCHRONIZE', 'false') === 'true';
+        const synchronize = getBooleanConfig(
+          configService.get('DB_SYNCHRONIZE'),
+          false,
+        );
         const nodeEnv = configService.get<string>('NODE_ENV', 'development');
         if (nodeEnv === 'production' && synchronize) {
           throw new Error('DB_SYNCHRONIZE must be false in production.');
@@ -141,6 +152,8 @@ import { configValidationSchema } from './config/config.validation';
             Sale,
             SaleItem,
             SalePayment,
+            SaleDelivery,
+            SaleDeliveryItem,
             SalesReturn,
             SalesReturnItem,
             SalesReturnPayment,
@@ -161,8 +174,12 @@ import { configValidationSchema } from './config/config.validation';
             FinanceInvoice,
             JournalEntry,
             JournalLine,
+            PeriodLock,
             Wallet,
             WalletTransaction,
+            OutboxEvent,
+            InventoryCostLayer,
+            InventoryMovement,
             TaxEntity,
             PriceTierEntity,
             ProductPriceTierEntity,
@@ -177,7 +194,7 @@ import { configValidationSchema } from './config/config.validation';
             IdempotencyKey,
           ],
           synchronize,
-          ssl: configService.getOrThrow<string>('DB_SSL') === 'true',
+          ssl: getBooleanConfig(configService.get('DB_SSL'), false),
         };
       },
     }),

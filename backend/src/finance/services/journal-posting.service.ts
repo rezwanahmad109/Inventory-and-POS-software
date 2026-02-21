@@ -2,10 +2,10 @@ import {
   BadRequestException,
   Injectable,
 } from '@nestjs/common';
-import { InjectRepository } from '@nestjs/typeorm';
-import { DataSource, Repository } from 'typeorm';
+import { DataSource, EntityManager } from 'typeorm';
 
 import { JournalEntry, JournalLine } from '../../database/entities/journal-entry.entity';
+import { PeriodLock } from '../../database/entities/period-lock.entity';
 
 interface PostJournalLineInput {
   accountId: string;
@@ -23,20 +23,88 @@ export interface PostJournalEntryInput {
   description?: string | null;
   idempotencyKey?: string | null;
   postedBy?: string | null;
+  reversalOfId?: string | null;
   lines: PostJournalLineInput[];
 }
 
 @Injectable()
 export class JournalPostingService {
-  constructor(
-    @InjectRepository(JournalEntry)
-    private readonly journalEntryRepository: Repository<JournalEntry>,
-    private readonly dataSource: DataSource,
-  ) {}
+  constructor(private readonly dataSource: DataSource) {}
 
-  async post(input: PostJournalEntryInput): Promise<JournalEntry> {
+  async post(
+    input: PostJournalEntryInput,
+    manager?: EntityManager,
+  ): Promise<JournalEntry> {
+    if (manager) {
+      return this.postWithinManager(input, manager);
+    }
+
+    return this.dataSource.transaction((transactionManager) =>
+      this.postWithinManager(input, transactionManager),
+    );
+  }
+
+  // IFRS/GAAP audit trail principle: posted entries are immutable; corrections use reversing entries.
+  async reverse(entryId: string, reason: string, postedBy?: string): Promise<JournalEntry> {
+    return this.dataSource.transaction(async (manager) => {
+      const existing = await manager.findOneOrFail(JournalEntry, {
+        where: { id: entryId },
+        relations: { lines: true },
+      });
+
+      if (existing.status !== 'posted') {
+        throw new BadRequestException('Only posted entries can be reversed.');
+      }
+
+      const priorReversal = await manager.findOne(JournalEntry, {
+        where: { reversalOfId: existing.id },
+      });
+      if (priorReversal) {
+        return manager.findOneOrFail(JournalEntry, {
+          where: { id: priorReversal.id },
+          relations: { lines: true },
+        });
+      }
+
+      return this.postWithinManager(
+        {
+          entryDate: new Date(),
+          sourceType: 'journal_reversal',
+          sourceId: entryId,
+          description: reason,
+          postedBy,
+          reversalOfId: existing.id,
+          lines: existing.lines.map((line) => ({
+            accountId: line.accountId,
+            partyId: line.partyId,
+            debit: Number(line.credit),
+            credit: Number(line.debit),
+            memo: `Reversal of ${existing.entryNo}`,
+            branchId: line.branchId,
+          })),
+        },
+        manager,
+      );
+    });
+  }
+
+  private async postWithinManager(
+    input: PostJournalEntryInput,
+    manager: EntityManager,
+  ): Promise<JournalEntry> {
     if (input.lines.length < 2) {
       throw new BadRequestException('Journal requires at least two lines.');
+    }
+
+    for (const line of input.lines) {
+      const debit = Number(line.debit.toFixed(2));
+      const credit = Number(line.credit.toFixed(2));
+      const singleSide = (debit > 0 && credit === 0) || (credit > 0 && debit === 0);
+      if (!singleSide) {
+        throw new BadRequestException(
+          'Each journal line must be single-sided: either debit or credit.',
+        );
+      }
     }
 
     const totalDebit = Number(
@@ -56,92 +124,78 @@ export class JournalPostingService {
       );
     }
 
-    return this.dataSource.transaction(async (manager) => {
-      if (input.idempotencyKey) {
-        const existing = await manager.findOne(JournalEntry, {
-          where: { idempotencyKey: input.idempotencyKey },
-          relations: { lines: true },
-        });
-        if (existing) {
-          return existing;
-        }
-      }
+    await this.ensurePostingDateIsOpen(input.entryDate, manager);
 
-      const entryNo = await this.generateEntryNo(manager);
-      const entry = manager.create(JournalEntry, {
-        entryNo,
-        entryDate: input.entryDate,
-        sourceType: input.sourceType,
-        sourceId: input.sourceId ?? null,
-        description: input.description ?? null,
-        idempotencyKey: input.idempotencyKey ?? null,
-        status: 'posted',
-        postedAt: new Date(),
-        postedBy: input.postedBy ?? null,
-      });
-
-      const savedEntry = await manager.save(JournalEntry, entry);
-
-      const lines = input.lines.map((line, index) =>
-        manager.create(JournalLine, {
-          journalEntryId: savedEntry.id,
-          lineNo: index + 1,
-          accountId: line.accountId,
-          partyId: line.partyId ?? null,
-          debit: Number(line.debit.toFixed(2)),
-          credit: Number(line.credit.toFixed(2)),
-          memo: line.memo ?? null,
-          branchId: line.branchId ?? null,
-        }),
-      );
-
-      await manager.save(JournalLine, lines);
-
-      const reloaded = await manager.findOneOrFail(JournalEntry, {
-        where: { id: savedEntry.id },
+    if (input.idempotencyKey) {
+      const existing = await manager.findOne(JournalEntry, {
+        where: { idempotencyKey: input.idempotencyKey },
         relations: { lines: true },
       });
-
-      return reloaded;
-    });
-  }
-
-  // IFRS/GAAP audit trail principle: posted entries are immutable; corrections use reversing entries.
-  async reverse(entryId: string, reason: string, postedBy?: string): Promise<JournalEntry> {
-    return this.dataSource.transaction(async (manager) => {
-      const existing = await manager.findOneOrFail(JournalEntry, {
-        where: { id: entryId },
-        relations: { lines: true },
-      });
-
-      if (existing.status !== 'posted') {
-        throw new BadRequestException('Only posted entries can be reversed.');
+      if (existing) {
+        return existing;
       }
+    }
 
-      const reversal = await this.post({
-        entryDate: new Date(),
-        sourceType: 'journal_reversal',
-        sourceId: entryId,
-        description: reason,
-        postedBy,
-        lines: existing.lines.map((line) => ({
-          accountId: line.accountId,
-          partyId: line.partyId,
-          debit: Number(line.credit),
-          credit: Number(line.debit),
-          memo: `Reversal of ${existing.entryNo}`,
-          branchId: line.branchId,
-        })),
-      });
-
-      existing.status = 'reversed';
-      await manager.save(JournalEntry, existing);
-
-      return reversal;
+    const entryNo = await this.generateEntryNo(manager);
+    const entry = manager.create(JournalEntry, {
+      entryNo,
+      entryDate: input.entryDate,
+      sourceType: input.sourceType,
+      sourceId: input.sourceId ?? null,
+      description: input.description ?? null,
+      idempotencyKey: input.idempotencyKey ?? null,
+      status: 'posted',
+      postedAt: new Date(),
+      postedBy: input.postedBy ?? null,
+      reversalOfId: input.reversalOfId ?? null,
     });
+
+    const savedEntry = await manager.save(JournalEntry, entry);
+
+    const lines = input.lines.map((line, index) =>
+      manager.create(JournalLine, {
+        journalEntryId: savedEntry.id,
+        lineNo: index + 1,
+        accountId: line.accountId,
+        partyId: line.partyId ?? null,
+        debit: Number(line.debit.toFixed(2)),
+        credit: Number(line.credit.toFixed(2)),
+        memo: line.memo ?? null,
+        branchId: line.branchId ?? null,
+      }),
+    );
+
+    await manager.save(JournalLine, lines);
+
+    const reloaded = await manager.findOneOrFail(JournalEntry, {
+      where: { id: savedEntry.id },
+      relations: { lines: true },
+    });
+
+    return reloaded;
   }
 
-  private async generateEntryNo(manager: DataSource['manager']): Promise<string> {
+  private async ensurePostingDateIsOpen(
+    postingDate: Date,
+    manager: EntityManager,
+  ): Promise<void> {
+    const activeLock = await manager
+      .createQueryBuilder(PeriodLock, 'period')
+      .where('period.is_locked = TRUE')
+      .andWhere('period.start_date <= :postingDate', { postingDate })
+      .andWhere('period.end_date >= :postingDate', { postingDate })
+      .getOne();
+
+    if (!activeLock) {
+      return;
+    }
+
+    throw new BadRequestException(
+      `Posting date ${postingDate.toISOString().slice(0, 10)} is inside a locked accounting period.`,
+    );
+  }
+
+  private async generateEntryNo(manager: EntityManager): Promise<string> {
     const now = new Date();
     const prefix = `JE-${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, '0')}`;
 

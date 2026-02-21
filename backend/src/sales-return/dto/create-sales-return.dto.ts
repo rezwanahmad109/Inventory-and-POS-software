@@ -20,6 +20,10 @@ export class CreateSalesReturnItemDto {
   @IsUUID('4')
   productId!: string;
 
+  @IsOptional()
+  @IsUUID('4')
+  warehouseId?: string;
+
   @IsPositive()
   quantity!: number;
 
@@ -40,7 +44,9 @@ export class CreateSalesReturnDto {
   @IsNotEmpty()
   @IsArray()
   @ArrayMinSize(1)
-  @ArrayUnique((item: CreateSalesReturnItemDto) => item.productId)
+  @ArrayUnique(
+    (item: CreateSalesReturnItemDto) => `${item.productId}:${item.warehouseId ?? ''}`,
+  )
   @ValidateNested({ each: true })
   @Type(() => CreateSalesReturnItemDto)
   items!: CreateSalesReturnItemDto[];

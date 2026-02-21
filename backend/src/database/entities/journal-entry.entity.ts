@@ -51,6 +51,16 @@ export class JournalEntry {
   @Column({ name: 'posted_by', type: 'uuid', nullable: true })
   postedBy!: string | null;
 
+  @Column({ name: 'reversal_of_id', type: 'uuid', nullable: true })
+  reversalOfId!: string | null;
+
+  @ManyToOne(() => JournalEntry, { nullable: true, onDelete: 'RESTRICT' })
+  @JoinColumn({ name: 'reversal_of_id' })
+  reversalOf!: JournalEntry | null;
+
+  @OneToMany(() => JournalEntry, (entry) => entry.reversalOf)
+  reversals!: JournalEntry[];
+
   @OneToMany(() => JournalLine, (line) => line.journalEntry)
   lines!: JournalLine[];
 

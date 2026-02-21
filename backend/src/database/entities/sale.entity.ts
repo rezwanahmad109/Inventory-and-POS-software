@@ -20,6 +20,7 @@ import { TaxMethod } from '../../common/enums/tax-method.enum';
 import { decimalTransformer } from '../../common/transformers/decimal.transformer';
 import { BranchEntity } from './branch.entity';
 import { Customer } from './customer.entity';
+import { SaleDelivery } from './sale-delivery.entity';
 import { SaleItem } from './sale-item.entity';
 import { SalePayment } from './sale-payment.entity';
 import { SalesReturn } from './sales-return.entity';
@@ -31,7 +32,7 @@ export class Sale {
   @PrimaryGeneratedColumn('uuid')
   id!: string;
 
-  /** Legacy customer name field — kept for backward compatibility */
+  /** Legacy customer name field kept for backward compatibility */
   @Column({ length: 160, nullable: true })
   customer!: string | null;
 
@@ -261,6 +262,9 @@ export class Sale {
   @OneToMany(() => SalePayment, (payment) => payment.sale)
   payments!: SalePayment[];
 
+  @OneToMany(() => SaleDelivery, (delivery) => delivery.orderSale)
+  deliveries!: SaleDelivery[];
+
   @OneToMany(() => SalesReturn, (salesReturn) => salesReturn.originalSale)
   salesReturns!: SalesReturn[];
 
@@ -287,3 +291,4 @@ export class Sale {
   @UpdateDateColumn({ name: 'updated_at' })
   updatedAt!: Date;
 }
+

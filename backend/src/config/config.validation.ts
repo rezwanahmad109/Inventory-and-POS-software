@@ -23,6 +23,10 @@ export const configValidationSchema = Joi.object({
   RATE_LIMIT_TTL_SECONDS: Joi.number().integer().min(1).default(60),
   RATE_LIMIT_MAX_REQUESTS: Joi.number().integer().min(1).default(120),
   DASHBOARD_CACHE_TTL_SECONDS: Joi.number().integer().min(1).default(30),
+  ALLOW_NEGATIVE_STOCK: Joi.boolean().truthy('true').falsy('false').default(false),
+  OUTBOX_WORKER_ENABLED: Joi.boolean().truthy('true').falsy('false').default(true),
+  OUTBOX_BATCH_SIZE: Joi.number().integer().min(1).max(500).default(50),
+  OUTBOX_RETRY_BASE_MS: Joi.number().integer().min(100).default(5000),
 
   ADMIN_EMAIL: Joi.string().email().required(),
   ADMIN_PASSWORD: Joi.string().min(8).required(),

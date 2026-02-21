@@ -50,6 +50,23 @@ export class Customer {
   })
   totalDeposit!: number;
 
+  @Column({
+    name: 'credit_limit',
+    type: 'numeric',
+    precision: 12,
+    scale: 2,
+    nullable: true,
+    transformer: decimalTransformer,
+  })
+  creditLimit!: number | null;
+
+  @Column({
+    name: 'credit_terms_days',
+    type: 'integer',
+    nullable: true,
+  })
+  creditTermsDays!: number | null;
+
   @OneToMany(() => Payment, (payment) => payment.customer)
   payments!: Payment[];
 

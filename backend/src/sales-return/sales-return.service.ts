@@ -9,6 +9,7 @@ import { EntityManager, Repository } from 'typeorm';
 import { BranchesService } from '../branches/branches.service';
 import { SaleStatus } from '../common/enums/sale-status.enum';
 import { AccountingEventBusService } from '../common/services/accounting-event-bus.service';
+import { InventoryCostingService } from '../common/services/inventory-costing.service';
 import { PartyBalanceService } from '../common/services/party-balance.service';
 import { TransactionRunnerService } from '../common/services/transaction-runner.service';
 import { Customer } from '../database/entities/customer.entity';
@@ -32,6 +33,7 @@ export class SalesReturnService {
     private readonly accountingEventBus: AccountingEventBusService,
     private readonly transactionRunner: TransactionRunnerService,
     private readonly branchesService: BranchesService,
+    private readonly inventoryCostingService: InventoryCostingService,
     private readonly partyBalanceService: PartyBalanceService,
   ) {}
 
@@ -75,7 +77,11 @@ export class SalesReturnService {
       );
 
       for (const item of createSalesReturnDto.items) {
-        const saleItem = originalSale.items.find((si) => si.productId === item.productId);
+        const saleItem = originalSale.items.find(
+          (si) =>
+            si.productId === item.productId &&
+            (!item.warehouseId || si.warehouseId === item.warehouseId),
+        );
         if (!saleItem) {
           throw new BadRequestException(
             `Product "${item.productId}" was not part of the original sale.`,
@@ -117,24 +123,30 @@ export class SalesReturnService {
         }
 
         // Find corresponding sale item to validate quantity
-        const saleItem = originalSale.items.find((si) => si.productId === item.productId);
+        const saleItem = originalSale.items.find(
+          (si) =>
+            si.productId === item.productId &&
+            (!item.warehouseId || si.warehouseId === item.warehouseId),
+        );
         if (!saleItem) {
           throw new BadRequestException(`Product "${product.name}" was not part of the original sale.`);
         }
 
-        if (originalSale.branchId) {
-          await this.branchesService.increaseStockInBranch(
-            manager,
-            originalSale.branchId,
-            product,
-            item.quantity,
-            'sales_return',
+        const resolvedWarehouseId =
+          item.warehouseId ?? saleItem.warehouseId ?? originalSale.branchId ?? null;
+        if (!resolvedWarehouseId) {
+          throw new BadRequestException(
+            `Warehouse is required for product "${product.name}" return line.`,
           );
-        } else {
-          // Update product stock (add back returned quantity)
-          product.stockQty += item.quantity;
-          await manager.save(Product, product);
         }
+
+        await this.branchesService.increaseStockInBranch(
+          manager,
+          resolvedWarehouseId,
+          product,
+          item.quantity,
+          'sales_return',
+        );
 
         // Always use original sale price to prevent client-side refund tampering.
         const unitPrice = Number(saleItem.unitPrice);
@@ -146,12 +158,23 @@ export class SalesReturnService {
           salesReturnId: persistedReturn.id,
           product,
           productId: product.id,
+          warehouseId: resolvedWarehouseId,
           quantity: item.quantity,
           unitPrice,
           subtotal,
         });
 
-        persistedItems.push(await manager.save(SalesReturnItem, returnItem));
+        const savedReturnItem = await manager.save(SalesReturnItem, returnItem);
+        persistedItems.push(savedReturnItem);
+        await this.inventoryCostingService.restoreFromSalesReturn(manager, {
+          originalSaleId: originalSale.id,
+          productId: product.id,
+          warehouseId: resolvedWarehouseId,
+          quantity: item.quantity,
+          referenceId: persistedReturn.id,
+          referenceLineId: savedReturnItem.id,
+          actorId: actorUserId ?? null,
+        });
       }
 
       persistedReturn.totalRefund = Number(runningTotal.toFixed(2));

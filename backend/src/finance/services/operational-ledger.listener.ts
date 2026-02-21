@@ -13,8 +13,6 @@ import {
   PurchaseBilledEvent,
   PurchasePaymentSentEvent,
   PurchaseReturnEvent,
-  SaleInvoicedEvent,
-  SalePaymentReceivedEvent,
   SalesReturnEvent,
 } from '../../common/services/accounting-event-bus.service';
 import { FinanceAccount } from '../../database/entities/finance-account.entity';
@@ -33,16 +31,6 @@ export class OperationalLedgerListener implements OnModuleInit, OnModuleDestroy 
   ) {}
 
   onModuleInit(): void {
-    this.unsubscribeCallbacks.push(
-      this.eventBus.subscribe('sale.invoiced', (payload) => {
-        void this.handleSaleInvoiced(payload);
-      }),
-    );
-    this.unsubscribeCallbacks.push(
-      this.eventBus.subscribe('sale.payment_received', (payload) => {
-        void this.handleSalePaymentReceived(payload);
-      }),
-    );
     this.unsubscribeCallbacks.push(
       this.eventBus.subscribe('purchase.billed', (payload) => {
         void this.handlePurchaseBilled(payload);
@@ -68,80 +56,6 @@ export class OperationalLedgerListener implements OnModuleInit, OnModuleDestroy 
   onModuleDestroy(): void {
     this.unsubscribeCallbacks.forEach((unsubscribe) => unsubscribe());
     this.unsubscribeCallbacks.length = 0;
-  }
-
-  private async handleSaleInvoiced(payload: SaleInvoicedEvent): Promise<void> {
-    try {
-      const accounts = await this.getAccountCodes();
-      await this.journalPostingService.post({
-        entryDate: payload.occurredAt,
-        sourceType: 'sale',
-        sourceId: payload.saleId,
-        idempotencyKey: `sale:invoice:${payload.saleId}`,
-        description: `Sale invoice ${payload.invoiceNumber}`,
-        lines: [
-          {
-            accountId: accounts.ar.id,
-            debit: payload.grandTotal,
-            credit: 0,
-            branchId: payload.branchId,
-          },
-          {
-            accountId: accounts.sales.id,
-            debit: 0,
-            credit: payload.subtotal,
-            branchId: payload.branchId,
-          },
-          ...(payload.taxTotal > 0
-            ? [
-                {
-                  accountId: accounts.outputTax.id,
-                  debit: 0,
-                  credit: payload.taxTotal,
-                  branchId: payload.branchId,
-                },
-              ]
-            : []),
-        ],
-      });
-    } catch (error) {
-      this.logger.warn(
-        `Failed to post sale invoice ledger for ${payload.saleId}: ${error instanceof Error ? error.message : 'unknown error'}`,
-      );
-    }
-  }
-
-  private async handleSalePaymentReceived(
-    payload: SalePaymentReceivedEvent,
-  ): Promise<void> {
-    try {
-      const accounts = await this.getAccountCodes();
-      await this.journalPostingService.post({
-        entryDate: payload.occurredAt,
-        sourceType: 'sale_payment',
-        sourceId: payload.saleId,
-        idempotencyKey: `sale:payment:${payload.saleId}:${payload.occurredAt.toISOString()}`,
-        description: `Sale payment ${payload.saleId}`,
-        lines: [
-          {
-            accountId: accounts.cash.id,
-            debit: payload.amount,
-            credit: 0,
-            branchId: payload.branchId,
-          },
-          {
-            accountId: accounts.ar.id,
-            debit: 0,
-            credit: payload.amount,
-            branchId: payload.branchId,
-          },
-        ],
-      });
-    } catch (error) {
-      this.logger.warn(
-        `Failed to post sale payment ledger for ${payload.saleId}: ${error instanceof Error ? error.message : 'unknown error'}`,
-      );
-    }
   }
 
   private async handlePurchaseBilled(

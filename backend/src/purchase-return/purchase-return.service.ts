@@ -9,6 +9,7 @@ import { EntityManager, Repository } from 'typeorm';
 import { BranchesService } from '../branches/branches.service';
 import { PurchaseStatus } from '../common/enums/purchase-status.enum';
 import { AccountingEventBusService } from '../common/services/accounting-event-bus.service';
+import { InventoryCostingService } from '../common/services/inventory-costing.service';
 import { PartyBalanceService } from '../common/services/party-balance.service';
 import { TransactionRunnerService } from '../common/services/transaction-runner.service';
 import { Product } from '../database/entities/product.entity';
@@ -31,6 +32,7 @@ export class PurchaseReturnService {
     private readonly accountingEventBus: AccountingEventBusService,
     private readonly transactionRunner: TransactionRunnerService,
     private readonly branchesService: BranchesService,
+    private readonly inventoryCostingService: InventoryCostingService,
     private readonly partyBalanceService: PartyBalanceService,
   ) {}
 
@@ -74,7 +76,11 @@ export class PurchaseReturnService {
       );
 
       for (const item of createPurchaseReturnDto.items) {
-        const purchaseItem = originalPurchase.items.find((pi) => pi.productId === item.productId);
+        const purchaseItem = originalPurchase.items.find(
+          (pi) =>
+            pi.productId === item.productId &&
+            (!item.warehouseId || pi.warehouseId === item.warehouseId),
+        );
         if (!purchaseItem) {
           throw new BadRequestException(
             `Product "${item.productId}" was not part of the original purchase.`,
@@ -116,30 +122,30 @@ export class PurchaseReturnService {
         }
 
         // Find corresponding purchase item to validate quantity
-        const purchaseItem = originalPurchase.items.find((pi) => pi.productId === item.productId);
+        const purchaseItem = originalPurchase.items.find(
+          (pi) =>
+            pi.productId === item.productId &&
+            (!item.warehouseId || pi.warehouseId === item.warehouseId),
+        );
         if (!purchaseItem) {
           throw new BadRequestException(`Product "${product.name}" was not part of the original purchase.`);
         }
 
-        // Update product stock (decrease by returned quantity)
-        if (!originalPurchase.branchId && product.stockQty < item.quantity) {
+        const resolvedWarehouseId =
+          item.warehouseId ?? purchaseItem.warehouseId ?? originalPurchase.branchId ?? null;
+        if (!resolvedWarehouseId) {
           throw new BadRequestException(
-            `Insufficient stock for "${product.name}". Available: ${product.stockQty}, requested to return: ${item.quantity}.`,
+            `Warehouse is required for product "${product.name}" return line.`,
           );
         }
 
-        if (originalPurchase.branchId) {
-          await this.branchesService.decreaseStockInBranch(
-            manager,
-            originalPurchase.branchId,
-            product,
-            item.quantity,
-            'purchase_return',
-          );
-        } else {
-          product.stockQty -= item.quantity;
-          await manager.save(Product, product);
-        }
+        await this.branchesService.decreaseStockInBranch(
+          manager,
+          resolvedWarehouseId,
+          product,
+          item.quantity,
+          'purchase_return',
+        );
 
         // Always use original purchase price to prevent client-side refund tampering.
         const unitPrice = Number(purchaseItem.unitPrice);
@@ -151,12 +157,23 @@ export class PurchaseReturnService {
           purchaseReturnId: persistedReturn.id,
           product,
           productId: product.id,
+          warehouseId: resolvedWarehouseId,
           quantity: item.quantity,
           unitPrice,
           subtotal,
         });
 
-        persistedItems.push(await manager.save(PurchaseReturnItem, returnItem));
+        const savedReturnItem = await manager.save(PurchaseReturnItem, returnItem);
+        persistedItems.push(savedReturnItem);
+        await this.inventoryCostingService.consumeForPurchaseReturn(manager, {
+          productId: product.id,
+          warehouseId: resolvedWarehouseId,
+          quantity: item.quantity,
+          referenceType: 'purchase_return',
+          referenceId: persistedReturn.id,
+          referenceLineId: savedReturnItem.id,
+          actorId: actorUserId ?? null,
+        });
       }
 
       persistedReturn.totalRefund = Number(runningTotal.toFixed(2));

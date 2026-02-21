@@ -89,6 +89,13 @@ export class StockTransferEntity {
   @Column({ type: 'text', nullable: true })
   notes!: string | null;
 
+  @Column({ name: 'cost_snapshot', type: 'jsonb', nullable: true })
+  costSnapshot!: Array<{
+    sourceLayerId: string | null;
+    quantity: number;
+    unitCost: number;
+  }> | null;
+
   @CreateDateColumn({ name: 'timestamp' })
   timestamp!: Date;
 }

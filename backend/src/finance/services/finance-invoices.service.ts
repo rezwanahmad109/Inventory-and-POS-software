@@ -4,7 +4,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { DataSource, Repository } from 'typeorm';
+import { DataSource, EntityManager, Repository } from 'typeorm';
 
 import { FinanceAccount } from '../../database/entities/finance-account.entity';
 import { FinanceInvoice } from '../../database/entities/finance-invoice.entity';
@@ -31,6 +31,12 @@ export class FinanceInvoicesService {
   ) {}
 
   async create(dto: CreateFinanceInvoiceDto, actorId: string): Promise<FinanceInvoice> {
+    if (dto.documentType === FinanceDocumentType.SALES_INVOICE) {
+      throw new BadRequestException(
+        'Sales invoice posting is sourced from the sales issuance workflow only.',
+      );
+    }
+
     return this.dataSource.transaction(async (manager) => {
       const party = await manager.findOne(FinanceParty, {
         where: { id: dto.partyId },
@@ -54,12 +60,13 @@ export class FinanceInvoicesService {
         taxTotal: Number((dto.taxTotal ?? 0).toFixed(2)),
         totalAmount: Number(dto.totalAmount.toFixed(2)),
         balanceDue: Number(dto.totalAmount.toFixed(2)),
+        invoiceBalance: Number(dto.totalAmount.toFixed(2)),
         currency: (dto.currency ?? 'USD').toUpperCase(),
         status: 'open',
       });
 
       const saved = await manager.save(FinanceInvoice, invoice);
-      await this.postInvoiceJournal(saved, actorId, dto.idempotencyKey ?? null);
+      await this.postInvoiceJournal(saved, actorId, dto.idempotencyKey ?? null, manager);
 
       await manager.save(
         AuditLog,
@@ -119,13 +126,14 @@ export class FinanceInvoicesService {
     invoice: FinanceInvoice,
     actorId: string,
     idempotencyKey: string | null,
+    manager: EntityManager,
   ): Promise<void> {
-    const arAccount = await this.getAccountByCodeOrFail('1100-AR');
-    const apAccount = await this.getAccountByCodeOrFail('2100-AP');
-    const salesAccount = await this.getAccountByCodeOrFail('4000-SALES');
-    const purchaseAccount = await this.getAccountByCodeOrFail('5000-COGS');
-    const taxPayableAccount = await this.getAccountByCodeOrFail('2200-OUTPUT-TAX');
-    const taxReceivableAccount = await this.getAccountByCodeOrFail('1300-INPUT-TAX');
+    const arAccount = await this.getAccountByCodeOrFail('1100-AR', manager);
+    const apAccount = await this.getAccountByCodeOrFail('2100-AP', manager);
+    const salesAccount = await this.getAccountByCodeOrFail('4000-SALES', manager);
+    const purchaseAccount = await this.getAccountByCodeOrFail('5000-COGS', manager);
+    const taxPayableAccount = await this.getAccountByCodeOrFail('2200-OUTPUT-TAX', manager);
+    const taxReceivableAccount = await this.getAccountByCodeOrFail('1300-INPUT-TAX', manager);
 
     const lines: {
       accountId: string;
@@ -242,15 +250,18 @@ export class FinanceInvoicesService {
         throw new BadRequestException(`Unsupported invoice type: ${invoice.documentType}`);
     }
 
-    await this.journalPostingService.post({
-      entryDate: invoice.issueDate,
-      sourceType: 'finance_invoice',
-      sourceId: invoice.id,
-      description: `${invoice.documentType} ${invoice.documentNo}`,
-      idempotencyKey: idempotencyKey ? `invoice:${idempotencyKey}` : null,
-      postedBy: actorId,
-      lines,
-    });
+    await this.journalPostingService.post(
+      {
+        entryDate: invoice.issueDate,
+        sourceType: 'finance_invoice',
+        sourceId: invoice.id,
+        description: `${invoice.documentType} ${invoice.documentNo}`,
+        idempotencyKey: idempotencyKey ? `invoice:${idempotencyKey}` : null,
+        postedBy: actorId,
+        lines,
+      },
+      manager,
+    );
   }
 
   private async generateDocumentNo(
@@ -272,8 +283,14 @@ export class FinanceInvoicesService {
     return `${code}-${String(count + 1).padStart(6, '0')}`;
   }
 
-  private async getAccountByCodeOrFail(code: string): Promise<FinanceAccount> {
-    const account = await this.financeAccountRepository.findOne({ where: { code } });
+  private async getAccountByCodeOrFail(
+    code: string,
+    manager?: EntityManager,
+  ): Promise<FinanceAccount> {
+    const repository = manager
+      ? manager.getRepository(FinanceAccount)
+      : this.financeAccountRepository;
+    const account = await repository.findOne({ where: { code } });
     if (!account) {
       throw new NotFoundException(
         `Required finance account "${code}" is missing. Seed chart of accounts first.`,
